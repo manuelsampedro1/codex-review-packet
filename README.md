@@ -1,0 +1,76 @@
+# codex-review-packet
+
+Generate a compact Markdown packet for Codex or Claude Code before a repo review.
+
+The problem: most AI review output gets generic when the model sees only a diff and no repo rules. This tool bundles the diff, nearby repo context, and a suggested review prompt into one handoff file.
+
+## What It Does
+
+- Reads a local Git repository.
+- Collects changed files from `HEAD` against a base ref or from the index.
+- Pulls nearby repo context from files such as `AGENTS.md`, `README.md`, `DECISIONS.md`, and `TODO.md`.
+- Writes one Markdown packet that can be pasted into Codex or attached to another review workflow.
+
+## Why This Exists
+
+I wanted a small utility that makes AI repo reviews sharper without adding a hosted service or another framework. The output is designed for real use in local Codex sessions.
+
+## Stack
+
+- Python 3.11+
+- Standard library only
+- Git CLI installed locally
+
+## Quick Start
+
+```sh
+python3 codex_review_packet.py --repo /path/to/repo --base origin/main --output review-packet.md
+```
+
+Staged review:
+
+```sh
+python3 codex_review_packet.py --repo /path/to/repo --staged
+```
+
+## Example Output
+
+````md
+# Review Packet
+
+Base ref: origin/main
+Changed files:
+- README.md
+- scripts/deploy.sh
+
+## Repo Context
+### AGENTS.md
+...
+
+## Diff
+```diff
+...
+```
+
+## Suggested Review Prompt
+Review this change like a strict senior engineer...
+````
+
+## Status
+
+Working v1. The packet is intended to be inspectable and easy to modify, not "smart" in hidden ways.
+
+## Verification
+
+Run from this repo:
+
+```sh
+python3 -m py_compile codex_review_packet.py
+python3 codex_review_packet.py --repo . >/tmp/review-packet.md
+test -s /tmp/review-packet.md
+```
+
+## Files
+
+- `codex_review_packet.py`: CLI entrypoint.
+- `DECISIONS.md`: small design notes for the repo.
