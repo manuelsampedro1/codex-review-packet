@@ -23,6 +23,7 @@ from codex_review_packet import (  # noqa: E402
     review_lane_for_path,
     review_map_section,
     sensitive_change_section,
+    task_contract_section,
     untracked_file_diff,
     verification_checklist_section,
     verification_envelope_markdown,
@@ -40,6 +41,43 @@ def init_repo(path: pathlib.Path) -> None:
     (path / "README.md").write_text("initial\n", encoding="utf-8")
     run("git", "add", "README.md", cwd=path)
     run("git", "commit", "-m", "initial", cwd=path)
+
+
+def valid_task_contract() -> str:
+    return """# Agent Task
+
+## Objective
+
+Ship a focused repo improvement.
+
+## Acceptance Criteria
+
+- Packet includes the task contract.
+
+## Context
+
+Reviewers need the expected outcome before reading the diff and may compare TODO.md.
+
+## Constraints
+
+- Keep the tool local-first.
+
+## Expected Changes
+
+- Add a bounded task contract section.
+
+## Verification
+
+- Run unit tests.
+
+## Risks
+
+- Packet context can become too large.
+
+## Out of Scope
+
+- Hosted review workflows.
+"""
 
 
 class ReviewPacketTests(unittest.TestCase):
@@ -202,6 +240,85 @@ class ReviewPacketTests(unittest.TestCase):
             self.assertIn("# ...", packet)
             self.assertIn("more diff lines omitted", packet)
             self.assertNotIn("+four", packet)
+
+    def test_task_contract_section_summarizes_limited_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            contract = pathlib.Path(raw) / "AGENT_TASK.md"
+            contract.write_text(valid_task_contract(), encoding="utf-8")
+
+            section = task_contract_section(contract, max_lines=8)
+
+            self.assertIn("## Task Contract", section)
+            self.assertIn(f"Source: `{contract}`", section)
+            self.assertIn("Status: `pass`", section)
+            self.assertIn("Required sections: `8/8`", section)
+            self.assertIn("Missing sections: none", section)
+            self.assertIn("Placeholder markers: none", section)
+            self.assertIn("# Agent Task", section)
+            self.assertIn("# ...", section)
+            self.assertIn("more task contract lines omitted", section)
+
+    def test_task_contract_section_warns_on_missing_sections_and_placeholders(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            contract = pathlib.Path(raw) / "TASK_CONTRACT.md"
+            contract.write_text(
+                """# Agent Task
+
+## Objective
+
+TODO
+
+## Context
+
+placeholder
+""",
+                encoding="utf-8",
+            )
+
+            section = task_contract_section(contract, max_lines=40)
+
+            self.assertIn("Status: `warn`", section)
+            self.assertIn("Required sections: `2/8`", section)
+            self.assertIn("Acceptance Criteria", section)
+            self.assertIn("Expected Changes", section)
+            self.assertIn("Placeholder markers: Objective, Context", section)
+
+    def test_packet_auto_includes_repo_task_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw)
+            init_repo(repo)
+            (repo / "AGENT_TASK.md").write_text(valid_task_contract(), encoding="utf-8")
+            (repo / "README.md").write_text("changed\n", encoding="utf-8")
+
+            packet = build_packet(repo, base=None, staged=False, max_lines=20)
+
+            self.assertIn("## Task Contract", packet)
+            self.assertIn("Source: `" + str(repo / "AGENT_TASK.md") + "`", packet)
+            self.assertIn("Status: `pass`", packet)
+            self.assertIn("## Diff", packet)
+
+    def test_packet_can_include_explicit_task_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw) / "repo"
+            repo.mkdir()
+            init_repo(repo)
+            (repo / "README.md").write_text("changed\n", encoding="utf-8")
+            contract = pathlib.Path(raw) / "task.md"
+            contract.write_text(valid_task_contract(), encoding="utf-8")
+
+            packet = build_packet(
+                repo,
+                base=None,
+                staged=False,
+                max_lines=20,
+                task_contract=contract,
+                max_task_contract_lines=12,
+            )
+
+            self.assertIn("## Task Contract", packet)
+            self.assertIn(f"Source: `{contract}`", packet)
+            self.assertIn("Status: `pass`", packet)
+            self.assertIn("# ...", packet)
 
     def test_verification_checklist_section_includes_limited_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -1086,6 +1203,40 @@ class ReviewPacketTests(unittest.TestCase):
             self.assertIn("## Published HEAD", content)
             self.assertIn("Status: `warn`", content)
             self.assertIn("Remote HEAD: `def456`", content)
+
+    def test_cli_writes_packet_with_explicit_task_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw) / "repo"
+            repo.mkdir()
+            init_repo(repo)
+            (repo / "README.md").write_text("changed\n", encoding="utf-8")
+            contract = pathlib.Path(raw) / "task.md"
+            contract.write_text(valid_task_contract(), encoding="utf-8")
+            out = pathlib.Path(raw) / "packet.md"
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "codex_review_packet.py"),
+                    "--repo",
+                    str(repo),
+                    "--task-contract",
+                    str(contract),
+                    "--task-contract-lines",
+                    "12",
+                    "--output",
+                    str(out),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            self.assertIn("Wrote review packet", result.stdout)
+            content = out.read_text(encoding="utf-8")
+            self.assertIn("## Task Contract", content)
+            self.assertIn(f"Source: `{contract.resolve()}`", content)
+            self.assertIn("Required sections: `8/8`", content)
 
 
 if __name__ == "__main__":

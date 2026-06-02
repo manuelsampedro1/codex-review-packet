@@ -10,6 +10,7 @@ The problem: most AI review output gets generic when the model sees only a diff 
 - Collects changed files from `HEAD` against a base ref or from the index.
 - In working-tree mode, includes staged, unstaged, and untracked file evidence.
 - Pulls nearby repo context from files such as `AGENTS.md`, `README.md`, `DECISIONS.md`, and `TODO.md`.
+- Auto-detects `AGENT_TASK.md` or `TASK_CONTRACT.md`, or accepts `--task-contract`, so review packets carry the intended outcome before the diff.
 - Builds a review map that routes changed files into review lanes such as CI, security, tests, docs, agent instructions, and application code.
 - Adds a sensitive-change check for secret material, authorization or approval paths, and deploy or release paths.
 - Can cap the combined diff block so large packets stay usable in model context.
@@ -58,6 +59,19 @@ Large review with a capped diff block:
 
 ```sh
 python3 codex_review_packet.py --repo /path/to/repo --diff-lines 300 --output review-packet.md
+```
+
+Review packet with task contract context:
+
+```sh
+# If the repo contains AGENT_TASK.md or TASK_CONTRACT.md, the packet includes it automatically.
+python3 codex_review_packet.py --repo /path/to/repo --output review-packet.md
+
+python3 codex_review_packet.py \
+  --repo /path/to/repo \
+  --task-contract /path/to/AGENT_TASK.md \
+  --task-contract-lines 80 \
+  --output review-packet.md
 ```
 
 Review packet with a change-aware verification checklist:
@@ -171,6 +185,12 @@ Focus: Check fail-closed behavior, environment assumptions, rollback path, and w
 ### AGENTS.md
 ...
 
+## Task Contract
+- Status: `pass`
+- Required sections: `8/8`
+- Missing sections: none
+- Placeholder markers: none
+
 ## Repo Readiness
 Score: `84/100`
 ...
@@ -209,6 +229,42 @@ make build
 make lint
 python3 codex_review_packet.py --repo . >/tmp/review-packet.md
 python3 codex_review_packet.py --repo . --diff-lines 80 >/tmp/review-packet-capped.md
+cat >/tmp/agent-task.md <<'EOF'
+# Agent Task
+
+## Objective
+
+Ship one focused improvement.
+
+## Acceptance Criteria
+
+- Packet carries the expected outcome.
+
+## Context
+
+Reviewers need the task before the diff.
+
+## Constraints
+
+- Keep the tool local-first.
+
+## Expected Changes
+
+- Add a bounded task contract section.
+
+## Verification
+
+- Run unit tests.
+
+## Risks
+
+- Packet context can become too large.
+
+## Out of Scope
+
+- Hosted review workflows.
+EOF
+python3 codex_review_packet.py --repo . --task-contract /tmp/agent-task.md --task-contract-lines 20 >/tmp/review-packet-with-task-contract.md
 printf '## Python\n\n- Run unit tests.\n' >/tmp/verification-checklist.md
 python3 codex_review_packet.py --repo . --verification-checklist /tmp/verification-checklist.md >/tmp/review-packet-with-checklist.md
 python3 /Users/manuelsampedro/Documents/Codex/2026-05-24/flagships/verify-by-change/verify_by_change.py README.md codex_review_packet.py --json-envelope --output /tmp/verification-envelope.json
@@ -224,6 +280,8 @@ python3 codex_review_packet.py --repo . --ci-run /tmp/ci-run.json >/tmp/review-p
 node /path/to/repo-flightcheck/bin/repo-flightcheck.js . --check-remote --json > /tmp/published-head.json
 python3 codex_review_packet.py --repo . --published-head /tmp/published-head.json >/tmp/review-packet-with-published-head.md
 grep -q '## Review Map' /tmp/review-packet.md
+grep -q '## Task Contract' /tmp/review-packet-with-task-contract.md
+grep -q 'Required sections: `8/8`' /tmp/review-packet-with-task-contract.md
 grep -q 'Envelope: `verify-by-change.v1`' /tmp/review-packet-with-envelope.md
 grep -q 'verify-by-change:' /tmp/review-packet-generated-checklist.md
 grep -q 'Envelope: `verify-by-change.v1`' /tmp/review-packet-generated-envelope.md

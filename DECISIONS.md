@@ -70,6 +70,16 @@ Rationale:
 - Keeping the report external avoids coupling this tool to Node or to a specific readiness scanner runtime.
 - Only warning and failed readiness checks are expanded so clean reports stay compact.
 
+## Optional Task Contract Context
+
+Auto-detect repo-level `AGENT_TASK.md` or `TASK_CONTRACT.md`, and allow explicit task contracts with `--task-contract`.
+
+Rationale:
+
+- Reviewers need the intended outcome, constraints, and acceptance criteria before reading the diff.
+- The packet should carry bounded contract context without adding a hosted workflow or another runtime dependency.
+- Lightweight section and placeholder checks catch incomplete contracts without duplicating deeper `repo-flightcheck` validation.
+
 ## Generated Verification Checklist
 
 Allow callers to invoke a local `verify-by-change` executable or `.py` script with `--verify-by-change`.

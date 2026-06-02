@@ -13,6 +13,17 @@ import sys
 from typing import Any, Iterable
 
 CONTEXT_FILES = ("AGENTS.md", "README.md", "DECISIONS.md", "TODO.md")
+TASK_CONTRACT_FILES = ("AGENT_TASK.md", "TASK_CONTRACT.md")
+TASK_CONTRACT_REQUIRED_SECTIONS = (
+    "Objective",
+    "Acceptance Criteria",
+    "Context",
+    "Constraints",
+    "Expected Changes",
+    "Verification",
+    "Risks",
+    "Out of Scope",
+)
 
 REVIEW_LANE_GUIDANCE = {
     "Agent instructions": "Check whether agent behavior, scope, or safety rules changed.",
@@ -338,6 +349,91 @@ def context_sections(repo: pathlib.Path, max_lines: int) -> list[str]:
             continue
         sections.append(f"### {name}\n\n```md\n{excerpt}\n```")
     return sections
+
+
+def detect_task_contract(repo: pathlib.Path) -> pathlib.Path | None:
+    for name in TASK_CONTRACT_FILES:
+        path = repo / name
+        if path.exists() and path.is_file():
+            return path
+    return None
+
+
+def task_contract_section(path: pathlib.Path, max_lines: int) -> str:
+    text = path.read_text(encoding="utf-8")
+    analysis = analyze_task_contract(text)
+    body = limit_lines(text.strip() or "_Task contract is empty._", max_lines, "task contract")
+
+    parts = [
+        "## Task Contract",
+        "",
+        f"Source: `{path}`",
+        "",
+        f"- Status: `{analysis['status']}`",
+        f"- Required sections: `{analysis['present_count']}/{len(TASK_CONTRACT_REQUIRED_SECTIONS)}`",
+    ]
+
+    missing = analysis["missing_sections"]
+    placeholders = analysis["placeholder_sections"]
+    parts.append(f"- Missing sections: {', '.join(missing) if missing else 'none'}")
+    parts.append(f"- Placeholder markers: {', '.join(placeholders) if placeholders else 'none'}")
+    parts.extend(["", "```md", body, "```", ""])
+    return "\n".join(parts)
+
+
+def analyze_task_contract(text: str) -> dict[str, Any]:
+    sections = markdown_sections(text)
+    normalized_required = {normalize_heading(name): name for name in TASK_CONTRACT_REQUIRED_SECTIONS}
+    present = [label for key, label in normalized_required.items() if key in sections]
+    missing = [label for key, label in normalized_required.items() if key not in sections]
+    placeholder_sections = [
+        sections[key]["title"]
+        for key in sections
+        if key
+        if has_task_contract_placeholder(sections[key]["body"])
+    ]
+    if has_task_contract_placeholder(sections.get("", {"body": ""})["body"]):
+        placeholder_sections.insert(0, "Preamble")
+
+    return {
+        "status": "warn" if missing or placeholder_sections else "pass",
+        "present_count": len(present),
+        "missing_sections": missing,
+        "placeholder_sections": placeholder_sections,
+    }
+
+
+def markdown_sections(text: str) -> dict[str, dict[str, str]]:
+    sections: dict[str, dict[str, str]] = {"": {"title": "Preamble", "body": ""}}
+    current_key = ""
+    for line in text.splitlines():
+        match = re.match(r"^#{1,6}\s+(.+?)\s*$", line)
+        if match:
+            title = match.group(1).strip()
+            current_key = normalize_heading(title)
+            sections[current_key] = {"title": title, "body": ""}
+            continue
+        sections.setdefault(current_key, {"title": "Preamble", "body": ""})
+        sections[current_key]["body"] += f"{line}\n"
+    return sections
+
+
+def has_task_contract_placeholder(text: str) -> bool:
+    markers = {"todo", "tbd", "placeholder", "replace me"}
+    for line in text.splitlines():
+        stripped = line.strip().strip("-* ").strip()
+        lower = stripped.lower()
+        if lower in markers:
+            return True
+        if lower.startswith(("todo:", "tbd:", "placeholder:", "replace me:")):
+            return True
+        if re.fullmatch(r"\[(todo|tbd|placeholder|replace me)\]", lower):
+            return True
+    return False
+
+
+def normalize_heading(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
 
 
 def verification_text_section(source: str, text: str, max_lines: int) -> str:
@@ -779,10 +875,13 @@ def build_packet(
     max_readiness_checks: int = 8,
     ci_run: pathlib.Path | None = None,
     published_head: pathlib.Path | None = None,
+    task_contract: pathlib.Path | None = None,
+    max_task_contract_lines: int = 120,
 ) -> str:
     files = changed_files(repo, base, staged)
     diff = limit_lines(diff_body(repo, base, staged, max_untracked_lines).strip(), max_diff_lines, "diff")
     context = context_sections(repo, max_lines)
+    task_contract_path = task_contract or detect_task_contract(repo)
     verification_block = (
         f"\n{verification_checklist_section(verification_checklist, max_verification_lines)}"
         if verification_checklist
@@ -805,6 +904,11 @@ def build_packet(
     published_head_block = (
         f"\n{published_head_section(published_head)}"
         if published_head
+        else ""
+    )
+    task_contract_block = (
+        f"\n{task_contract_section(task_contract_path, max_task_contract_lines)}"
+        if task_contract_path
         else ""
     )
 
@@ -831,6 +935,7 @@ Base: `{base_label}`
 ## Repo Context
 
 {context_block}
+{task_contract_block}
 {readiness_block}
 {ci_block}
 {published_head_block}
@@ -868,6 +973,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--readiness-checks", type=positive_int, default=8, help="Max warning or failed readiness checks to include.")
     parser.add_argument("--ci-run", help="Optional GitHub Actions run JSON to include in the packet.")
     parser.add_argument("--published-head", help="Optional published-HEAD proof JSON to include in the packet.")
+    parser.add_argument("--task-contract", help="Optional AGENT_TASK.md or TASK_CONTRACT.md file to include in the packet.")
+    parser.add_argument("--task-contract-lines", type=positive_int, default=120, help="Max lines for the task contract block.")
     parser.add_argument("--output", help="Optional output file path. Defaults to stdout.")
     return parser.parse_args()
 
@@ -898,6 +1005,8 @@ def main() -> int:
         args.readiness_checks,
         pathlib.Path(args.ci_run).resolve() if args.ci_run else None,
         pathlib.Path(args.published_head).resolve() if args.published_head else None,
+        pathlib.Path(args.task_contract).resolve() if args.task_contract else None,
+        args.task_contract_lines,
     )
     if args.output:
         pathlib.Path(args.output).write_text(packet, encoding="utf-8")
