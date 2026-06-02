@@ -8,6 +8,7 @@ The problem: most AI review output gets generic when the model sees only a diff 
 
 - Reads a local Git repository.
 - Collects changed files from `HEAD` against a base ref or from the index.
+- In working-tree mode, includes staged, unstaged, and untracked file evidence.
 - Pulls nearby repo context from files such as `AGENTS.md`, `README.md`, `DECISIONS.md`, and `TODO.md`.
 - Writes one Markdown packet that can be pasted into Codex or attached to another review workflow.
 
@@ -31,6 +32,12 @@ Staged review:
 
 ```sh
 python3 codex_review_packet.py --repo /path/to/repo --staged
+```
+
+Working-tree review with limited untracked previews:
+
+```sh
+python3 codex_review_packet.py --repo /path/to/repo --untracked-lines 40 --output review-packet.md
 ```
 
 ## Example Output
@@ -66,6 +73,7 @@ Run from this repo:
 
 ```sh
 python3 -m py_compile codex_review_packet.py
+python3 -m unittest discover -s tests
 python3 codex_review_packet.py --repo . >/tmp/review-packet.md
 test -s /tmp/review-packet.md
 ```
@@ -73,4 +81,5 @@ test -s /tmp/review-packet.md
 ## Files
 
 - `codex_review_packet.py`: CLI entrypoint.
+- `tests/`: working-tree packet, staged packet, and CLI coverage.
 - `DECISIONS.md`: small design notes for the repo.

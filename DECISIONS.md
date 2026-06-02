@@ -20,3 +20,12 @@ Rationale:
 - Markdown is easier to inspect, paste, and tweak in GitHub or editors.
 - It also doubles as saved review context for later audits.
 
+## Working Tree Evidence
+
+When reviewing a working tree, include staged, unstaged, and untracked evidence in the packet.
+
+Rationale:
+
+- Codex review packets should match what a reviewer actually needs to inspect.
+- Listing an untracked file without showing any content weakens the handoff.
+- Staged-only mode remains available when the reviewer intentionally wants the index.
