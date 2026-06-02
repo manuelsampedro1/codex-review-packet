@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 import shlex
 import subprocess
 import sys
-from typing import Iterable
+from typing import Any, Iterable
 
 CONTEXT_FILES = ("AGENTS.md", "README.md", "DECISIONS.md", "TODO.md")
 
@@ -247,6 +248,57 @@ Source: `{path}`
 """
 
 
+def readiness_report_section(path: pathlib.Path, max_checks: int) -> str:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    summary: dict[str, Any] = payload.get("summary", {})
+    checks: list[dict[str, Any]] = payload.get("checks", [])
+    next_fixes: list[str] = payload.get("nextFixes", [])
+
+    score = summary.get("score", "unknown")
+    points_possible = summary.get("pointsPossible", 100)
+    passed = summary.get("passed", 0)
+    warnings = summary.get("warnings", 0)
+    failed = summary.get("failed", 0)
+    critical_failures = summary.get("criticalFailures", 0)
+    stack = payload.get("stack", "unknown")
+
+    attention_checks = [check for check in checks if check.get("status") != "pass"][:max_checks]
+
+    parts = [
+        "## Repo Readiness",
+        "",
+        f"Source: `{path}`",
+        "",
+        f"- Score: `{score}/{points_possible}`",
+        f"- Stack: `{stack}`",
+        f"- Summary: `{passed}` passed, `{warnings}` warnings, `{failed}` failed, `{critical_failures}` critical failures.",
+        "",
+    ]
+
+    if attention_checks:
+        parts.extend(["Attention checks:", ""])
+        for check in attention_checks:
+            status = str(check.get("status", "unknown")).upper()
+            title = check.get("title", "Untitled check")
+            message = check.get("message", "No message.")
+            parts.append(f"- `{status}` {title}: {message}")
+        omitted = len([check for check in checks if check.get("status") != "pass"]) - len(attention_checks)
+        if omitted > 0:
+            parts.append(f"- `...` {omitted} more readiness checks omitted")
+        parts.append("")
+    else:
+        parts.extend(["No warning or failed readiness checks.", ""])
+
+    if next_fixes:
+        parts.extend(["Next fixes:", ""])
+        parts.extend(f"- {fix}" for fix in next_fixes[:max_checks])
+        if len(next_fixes) > max_checks:
+            parts.append(f"- `...` {len(next_fixes) - max_checks} more fixes omitted")
+        parts.append("")
+
+    return "\n".join(parts).rstrip() + "\n"
+
+
 def build_packet(
     repo: pathlib.Path,
     base: str | None,
@@ -256,6 +308,8 @@ def build_packet(
     max_diff_lines: int | None = None,
     verification_checklist: pathlib.Path | None = None,
     max_verification_lines: int = 120,
+    readiness_report: pathlib.Path | None = None,
+    max_readiness_checks: int = 8,
 ) -> str:
     files = changed_files(repo, base, staged)
     diff = limit_lines(diff_body(repo, base, staged, max_untracked_lines).strip(), max_diff_lines, "diff")
@@ -263,6 +317,11 @@ def build_packet(
     verification_block = (
         f"\n{verification_checklist_section(verification_checklist, max_verification_lines)}"
         if verification_checklist
+        else ""
+    )
+    readiness_block = (
+        f"\n{readiness_report_section(readiness_report, max_readiness_checks)}"
+        if readiness_report
         else ""
     )
 
@@ -287,6 +346,7 @@ Base: `{base_label}`
 ## Repo Context
 
 {context_block}
+{readiness_block}
 
 ## Diff
 
@@ -313,6 +373,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--diff-lines", type=positive_int, help="Max lines for the combined diff block.")
     parser.add_argument("--verification-checklist", help="Optional Markdown checklist to include in the packet.")
     parser.add_argument("--verification-lines", type=positive_int, default=120, help="Max lines for the verification checklist block.")
+    parser.add_argument("--readiness-report", help="Optional repo-flightcheck JSON report to include in the packet.")
+    parser.add_argument("--readiness-checks", type=positive_int, default=8, help="Max warning or failed readiness checks to include.")
     parser.add_argument("--output", help="Optional output file path. Defaults to stdout.")
     return parser.parse_args()
 
@@ -336,6 +398,8 @@ def main() -> int:
         args.diff_lines,
         pathlib.Path(args.verification_checklist).resolve() if args.verification_checklist else None,
         args.verification_lines,
+        pathlib.Path(args.readiness_report).resolve() if args.readiness_report else None,
+        args.readiness_checks,
     )
     if args.output:
         pathlib.Path(args.output).write_text(packet, encoding="utf-8")

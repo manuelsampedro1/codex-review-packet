@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-review-packet"
+version = "0.1.0"
+description = "Generate compact Markdown review packets for AI-assisted repo reviews."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+  { name = "Manuel Sampedro" }
+]
+keywords = ["ai agents", "codex", "code review", "developer tools", "verification"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Quality Assurance"
+]
+
+[project.scripts]
+codex-review-packet = "codex_review_packet:main"
+
+[tool.setuptools]
+py-modules = ["codex_review_packet"]

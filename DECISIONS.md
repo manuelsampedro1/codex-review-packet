@@ -59,3 +59,13 @@ Rationale:
 - Mixed agent diffs need routing, not only a flat changed-file list.
 - Simple lanes help reviewers focus on CI, security, data, tests, docs, agent instructions, and application code without hiding judgment behind a score.
 - The map stays deterministic and path-based so a reviewer can challenge or ignore it easily.
+
+## Optional Readiness Report
+
+Allow callers to embed an external `repo-flightcheck --json` report with `--readiness-report`.
+
+Rationale:
+
+- A useful review packet should show repo setup risks before asking a reviewer to inspect the diff.
+- Keeping the report external avoids coupling this tool to Node or to a specific readiness scanner runtime.
+- Only warning and failed readiness checks are expanded so clean reports stay compact.

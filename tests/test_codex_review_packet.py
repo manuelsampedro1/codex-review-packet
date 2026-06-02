@@ -14,6 +14,7 @@ from codex_review_packet import (  # noqa: E402
     changed_files,
     limit_lines,
     parse_status_paths,
+    readiness_report_section,
     review_lane_for_path,
     review_map_section,
     untracked_file_diff,
@@ -183,6 +184,108 @@ class ReviewPacketTests(unittest.TestCase):
             self.assertIn("## Docs", packet)
             self.assertIn("- Review rendered Markdown.", packet)
 
+    def test_readiness_report_section_summarizes_repo_flightcheck_json(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            report = pathlib.Path(raw) / "repo-flightcheck.json"
+            report.write_text(
+                """{
+  "stack": "python",
+  "summary": {
+    "score": 84,
+    "pointsPossible": 100,
+    "passed": 10,
+    "warnings": 2,
+    "failed": 1,
+    "criticalFailures": 1
+  },
+  "checks": [
+    {"title": "README guidance", "status": "pass", "message": "README exists."},
+    {"title": "Verification command", "status": "fail", "message": "No reliable verification command detected."},
+    {"title": "CI workflow", "status": "warn", "message": "No GitHub Actions workflow detected."}
+  ],
+  "nextFixes": [
+    "Verification command: expose one obvious test command.",
+    "CI workflow: add a small workflow."
+  ]
+}
+""",
+                encoding="utf-8",
+            )
+
+            section = readiness_report_section(report, max_checks=1)
+
+            self.assertIn("## Repo Readiness", section)
+            self.assertIn("Score: `84/100`", section)
+            self.assertIn("Stack: `python`", section)
+            self.assertIn("`FAIL` Verification command", section)
+            self.assertIn("1 more readiness checks omitted", section)
+            self.assertIn("Verification command: expose one obvious test command.", section)
+
+    def test_readiness_report_section_notes_clean_report(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            report = pathlib.Path(raw) / "repo-flightcheck.json"
+            report.write_text(
+                """{
+  "stack": "node",
+  "summary": {
+    "score": 100,
+    "pointsPossible": 100,
+    "passed": 14,
+    "warnings": 0,
+    "failed": 0,
+    "criticalFailures": 0
+  },
+  "checks": [
+    {"title": "README guidance", "status": "pass", "message": "README exists."}
+  ],
+  "nextFixes": []
+}
+""",
+                encoding="utf-8",
+            )
+
+            section = readiness_report_section(report, max_checks=8)
+
+            self.assertIn("No warning or failed readiness checks.", section)
+            self.assertNotIn("Attention checks:", section)
+
+    def test_packet_can_include_repo_readiness_report(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw) / "repo"
+            repo.mkdir()
+            init_repo(repo)
+            (repo / "README.md").write_text("changed\n", encoding="utf-8")
+            report = pathlib.Path(raw) / "readiness.json"
+            report.write_text(
+                """{
+  "stack": "node",
+  "summary": {
+    "score": 100,
+    "pointsPossible": 100,
+    "passed": 14,
+    "warnings": 0,
+    "failed": 0,
+    "criticalFailures": 0
+  },
+  "checks": [],
+  "nextFixes": []
+}
+""",
+                encoding="utf-8",
+            )
+
+            packet = build_packet(
+                repo,
+                base=None,
+                staged=False,
+                max_lines=20,
+                readiness_report=report,
+            )
+
+            self.assertIn("## Repo Readiness", packet)
+            self.assertIn("Score: `100/100`", packet)
+            self.assertIn("## Diff", packet)
+
     def test_cli_writes_output_file(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             repo = pathlib.Path(raw) / "repo"
@@ -213,6 +316,53 @@ class ReviewPacketTests(unittest.TestCase):
             content = out.read_text(encoding="utf-8")
             self.assertIn("# Review Packet", content)
             self.assertIn("Review rendered Markdown", content)
+
+    def test_cli_writes_packet_with_readiness_report(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw) / "repo"
+            repo.mkdir()
+            init_repo(repo)
+            (repo / "README.md").write_text("changed\n", encoding="utf-8")
+            report = pathlib.Path(raw) / "readiness.json"
+            report.write_text(
+                """{
+  "stack": "node",
+  "summary": {
+    "score": 100,
+    "pointsPossible": 100,
+    "passed": 14,
+    "warnings": 0,
+    "failed": 0,
+    "criticalFailures": 0
+  },
+  "checks": [],
+  "nextFixes": []
+}
+""",
+                encoding="utf-8",
+            )
+            out = pathlib.Path(raw) / "packet.md"
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "codex_review_packet.py"),
+                    "--repo",
+                    str(repo),
+                    "--readiness-report",
+                    str(report),
+                    "--output",
+                    str(out),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            self.assertIn("Wrote review packet", result.stdout)
+            content = out.read_text(encoding="utf-8")
+            self.assertIn("## Repo Readiness", content)
+            self.assertIn("Score: `100/100`", content)
 
 
 if __name__ == "__main__":
