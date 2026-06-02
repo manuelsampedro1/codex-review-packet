@@ -398,6 +398,83 @@ class ReviewPacketTests(unittest.TestCase):
             self.assertIn("No warning or failed readiness checks.", section)
             self.assertNotIn("Attention checks:", section)
 
+    def test_readiness_report_section_summarizes_agent_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            report = pathlib.Path(raw) / "repo-flightcheck-contract.json"
+            report.write_text(
+                """{
+  "schemaVersion": "repo-flightcheck.agent-contract.v1",
+  "stack": "node",
+  "ready": false,
+  "threshold": 80,
+  "score": 96,
+  "criticalFailures": 0,
+  "requiredBeforeAgent": [
+    {
+      "title": "Working tree",
+      "status": "warn",
+      "message": "Working tree has changed paths."
+    },
+    {
+      "title": "CI workflow",
+      "status": "warn",
+      "message": "No GitHub Actions workflow detected."
+    }
+  ],
+  "recommendedBeforeAgent": [
+    {
+      "title": "License",
+      "status": "warn",
+      "message": "No license file found."
+    }
+  ],
+  "nextFixes": [
+    "Working tree: start from a clean Git state."
+  ]
+}
+""",
+                encoding="utf-8",
+            )
+
+            section = readiness_report_section(report, max_checks=1)
+
+            self.assertIn("Contract: `repo-flightcheck.agent-contract.v1`", section)
+            self.assertIn("Ready: `false`", section)
+            self.assertIn("Score: `96/100`", section)
+            self.assertIn("Threshold: `80`", section)
+            self.assertIn("`2` required blockers, `1` recommendations", section)
+            self.assertIn("Required before agent:", section)
+            self.assertIn("`WARN` Working tree", section)
+            self.assertIn("1 more readiness checks omitted", section)
+            self.assertIn("Recommended before agent:", section)
+            self.assertIn("`WARN` License", section)
+            self.assertIn("Working tree: start from a clean Git state.", section)
+
+    def test_readiness_report_section_notes_clean_agent_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            report = pathlib.Path(raw) / "repo-flightcheck-contract.json"
+            report.write_text(
+                """{
+  "schemaVersion": "repo-flightcheck.agent-contract.v1",
+  "stack": "node",
+  "ready": true,
+  "threshold": 80,
+  "score": 100,
+  "criticalFailures": 0,
+  "requiredBeforeAgent": [],
+  "recommendedBeforeAgent": [],
+  "nextFixes": []
+}
+""",
+                encoding="utf-8",
+            )
+
+            section = readiness_report_section(report, max_checks=8)
+
+            self.assertIn("Ready: `true`", section)
+            self.assertIn("No required blockers or recommendations.", section)
+            self.assertNotIn("Required before agent:", section)
+
     def test_packet_can_include_repo_readiness_report(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             repo = pathlib.Path(raw) / "repo"

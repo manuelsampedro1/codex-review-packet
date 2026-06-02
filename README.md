@@ -12,7 +12,7 @@ The problem: most AI review output gets generic when the model sees only a diff 
 - Pulls nearby repo context from files such as `AGENTS.md`, `README.md`, `DECISIONS.md`, and `TODO.md`.
 - Builds a review map that routes changed files into review lanes such as CI, security, tests, docs, agent instructions, and application code.
 - Can cap the combined diff block so large packets stay usable in model context.
-- Can embed a `repo-flightcheck --json` readiness report so review packets include repo setup risks before the diff.
+- Can embed a `repo-flightcheck --json` report or `repo-flightcheck --contract` artifact so review packets include repo setup risks before the diff.
 - Can embed a Markdown verification checklist or a `verify-by-change --json-envelope` artifact.
 - Can invoke a local `verify-by-change` executable or `.py` script directly and embed the generated checklist.
 - Writes one Markdown packet that can be pasted into Codex or attached to another review workflow.
@@ -97,6 +97,12 @@ python3 codex_review_packet.py \
   --repo /path/to/repo \
   --readiness-report /tmp/repo-readiness.json \
   --output review-packet.md
+
+node /path/to/repo-flightcheck/bin/repo-flightcheck.js /path/to/repo --contract > /tmp/repo-readiness-contract.json
+python3 codex_review_packet.py \
+  --repo /path/to/repo \
+  --readiness-report /tmp/repo-readiness-contract.json \
+  --output review-packet.md
 ```
 
 The repo also includes a small sample report at `examples/readiness-report.json` for local smoke tests.
@@ -160,10 +166,13 @@ python3 codex_review_packet.py --repo . --verification-checklist /tmp/verificati
 printf 'import sys\nprint("# Verification Checklist")\nprint("## Generated")\nprint("- args: " + " ".join(sys.argv[1:]))\n' >/tmp/fake_verify_by_change.py
 python3 codex_review_packet.py --repo . --verify-by-change /tmp/fake_verify_by_change.py >/tmp/review-packet-generated-checklist.md
 python3 codex_review_packet.py --repo . --readiness-report examples/readiness-report.json >/tmp/review-packet-with-readiness.md
+node /path/to/repo-flightcheck/bin/repo-flightcheck.js . --contract > /tmp/repo-readiness-contract.json
+python3 codex_review_packet.py --repo . --readiness-report /tmp/repo-readiness-contract.json >/tmp/review-packet-with-readiness-contract.md
 grep -q '## Review Map' /tmp/review-packet.md
 grep -q 'Envelope: `verify-by-change.v1`' /tmp/review-packet-with-envelope.md
 grep -q 'verify-by-change:' /tmp/review-packet-generated-checklist.md
 grep -q '## Repo Readiness' /tmp/review-packet-with-readiness.md
+grep -q 'Contract: `repo-flightcheck.agent-contract.v1`' /tmp/review-packet-with-readiness-contract.md
 test -s /tmp/review-packet.md
 ```
 

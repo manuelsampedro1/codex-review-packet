@@ -375,6 +375,9 @@ def generated_verification_checklist_section(
 
 def readiness_report_section(path: pathlib.Path, max_checks: int) -> str:
     payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("schemaVersion") == "repo-flightcheck.agent-contract.v1":
+        return readiness_contract_section(path, payload, max_checks)
+
     summary: dict[str, Any] = payload.get("summary", {})
     checks: list[dict[str, Any]] = payload.get("checks", [])
     next_fixes: list[str] = payload.get("nextFixes", [])
@@ -422,6 +425,57 @@ def readiness_report_section(path: pathlib.Path, max_checks: int) -> str:
         parts.append("")
 
     return "\n".join(parts).rstrip() + "\n"
+
+
+def readiness_contract_section(path: pathlib.Path, payload: dict[str, Any], max_checks: int) -> str:
+    required: list[dict[str, Any]] = payload.get("requiredBeforeAgent", [])
+    recommended: list[dict[str, Any]] = payload.get("recommendedBeforeAgent", [])
+    next_fixes: list[str] = payload.get("nextFixes", [])
+
+    parts = [
+        "## Repo Readiness",
+        "",
+        f"Source: `{path}`",
+        "",
+        "- Contract: `repo-flightcheck.agent-contract.v1`",
+        f"- Ready: `{str(payload.get('ready', False)).lower()}`",
+        f"- Score: `{payload.get('score', 'unknown')}/100`",
+        f"- Threshold: `{payload.get('threshold', 'unknown')}`",
+        f"- Stack: `{payload.get('stack', 'unknown')}`",
+        f"- Summary: `{len(required)}` required blockers, `{len(recommended)}` recommendations, `{payload.get('criticalFailures', 0)}` critical failures.",
+        "",
+    ]
+
+    append_contract_checks(parts, "Required before agent:", required, max_checks)
+    append_contract_checks(parts, "Recommended before agent:", recommended, max_checks)
+
+    if not required and not recommended:
+        parts.extend(["No required blockers or recommendations.", ""])
+
+    if next_fixes:
+        parts.extend(["Next fixes:", ""])
+        parts.extend(f"- {fix}" for fix in next_fixes[:max_checks])
+        if len(next_fixes) > max_checks:
+            parts.append(f"- `...` {len(next_fixes) - max_checks} more fixes omitted")
+        parts.append("")
+
+    return "\n".join(parts).rstrip() + "\n"
+
+
+def append_contract_checks(parts: list[str], title: str, checks: list[dict[str, Any]], max_checks: int) -> None:
+    if not checks:
+        return
+
+    parts.extend([title, ""])
+    for check in checks[:max_checks]:
+        status = str(check.get("status", "unknown")).upper()
+        check_title = check.get("title", "Untitled check")
+        message = check.get("message", "No message.")
+        parts.append(f"- `{status}` {check_title}: {message}")
+    omitted = len(checks) - min(len(checks), max_checks)
+    if omitted > 0:
+        parts.append(f"- `...` {omitted} more readiness checks omitted")
+    parts.append("")
 
 
 def build_packet(
