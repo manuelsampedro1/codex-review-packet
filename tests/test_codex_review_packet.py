@@ -9,7 +9,14 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from codex_review_packet import build_packet, changed_files, limit_lines, parse_status_paths, untracked_file_diff  # noqa: E402
+from codex_review_packet import (  # noqa: E402
+    build_packet,
+    changed_files,
+    limit_lines,
+    parse_status_paths,
+    untracked_file_diff,
+    verification_checklist_section,
+)
 
 
 def run(*args: str, cwd: pathlib.Path) -> None:
@@ -107,12 +114,47 @@ class ReviewPacketTests(unittest.TestCase):
             self.assertIn("more diff lines omitted", packet)
             self.assertNotIn("+four", packet)
 
+    def test_verification_checklist_section_includes_limited_markdown(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            checklist = pathlib.Path(raw) / "checklist.md"
+            checklist.write_text("# Verification Checklist\n\n## Python\n\n- run tests\n- inspect docs\n", encoding="utf-8")
+
+            section = verification_checklist_section(checklist, max_lines=4)
+
+            self.assertIn("## Verification Checklist", section)
+            self.assertIn(f"Source: `{checklist}`", section)
+            self.assertIn("# Verification Checklist", section)
+            self.assertIn("# ... 2 more verification checklist lines omitted", section)
+            self.assertNotIn("- inspect docs", section)
+
+    def test_packet_can_include_external_verification_checklist(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw)
+            init_repo(repo)
+            (repo / "README.md").write_text("changed\n", encoding="utf-8")
+            checklist = pathlib.Path(raw) / "verification.md"
+            checklist.write_text("## Docs\n\n- Review rendered Markdown.\n", encoding="utf-8")
+
+            packet = build_packet(
+                repo,
+                base=None,
+                staged=False,
+                max_lines=20,
+                verification_checklist=checklist,
+            )
+
+            self.assertIn("## Verification Checklist", packet)
+            self.assertIn("## Docs", packet)
+            self.assertIn("- Review rendered Markdown.", packet)
+
     def test_cli_writes_output_file(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             repo = pathlib.Path(raw) / "repo"
             repo.mkdir()
             init_repo(repo)
             (repo / "README.md").write_text("changed\n", encoding="utf-8")
+            checklist = pathlib.Path(raw) / "verification.md"
+            checklist.write_text("## Docs\n\n- Review rendered Markdown.\n", encoding="utf-8")
             out = pathlib.Path(raw) / "packet.md"
 
             result = subprocess.run(
@@ -121,6 +163,8 @@ class ReviewPacketTests(unittest.TestCase):
                     str(ROOT / "codex_review_packet.py"),
                     "--repo",
                     str(repo),
+                    "--verification-checklist",
+                    str(checklist),
                     "--output",
                     str(out),
                 ],
@@ -130,7 +174,9 @@ class ReviewPacketTests(unittest.TestCase):
             )
 
             self.assertIn("Wrote review packet", result.stdout)
-            self.assertIn("# Review Packet", out.read_text(encoding="utf-8"))
+            content = out.read_text(encoding="utf-8")
+            self.assertIn("# Review Packet", content)
+            self.assertIn("Review rendered Markdown", content)
 
 
 if __name__ == "__main__":

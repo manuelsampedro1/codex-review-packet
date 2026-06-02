@@ -39,3 +39,13 @@ Rationale:
 - Review packets should stay useful inside model context windows.
 - Large diffs still need an honest omission marker instead of silently dropping content.
 - The default remains uncapped so local reviewers can choose the tradeoff explicitly.
+
+## Optional Verification Checklist
+
+Allow callers to embed an external Markdown verification checklist with `--verification-checklist`.
+
+Rationale:
+
+- Review packets are stronger when they include both the diff and the proposed verification plan.
+- Keeping the checklist external avoids coupling this repo to a specific verification generator.
+- A line cap keeps the packet usable in model context while preserving an explicit omission marker.

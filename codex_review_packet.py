@@ -148,6 +148,21 @@ def context_sections(repo: pathlib.Path, max_lines: int) -> list[str]:
     return sections
 
 
+def verification_checklist_section(path: pathlib.Path, max_lines: int) -> str:
+    text = path.read_text(encoding="utf-8").strip()
+    if not text:
+        text = "_Verification checklist file is empty._"
+    text = limit_lines(text, max_lines, "verification checklist")
+    return f"""## Verification Checklist
+
+Source: `{path}`
+
+```md
+{text}
+```
+"""
+
+
 def build_packet(
     repo: pathlib.Path,
     base: str | None,
@@ -155,10 +170,17 @@ def build_packet(
     max_lines: int,
     max_untracked_lines: int = 80,
     max_diff_lines: int | None = None,
+    verification_checklist: pathlib.Path | None = None,
+    max_verification_lines: int = 120,
 ) -> str:
     files = changed_files(repo, base, staged)
     diff = limit_lines(diff_body(repo, base, staged, max_untracked_lines).strip(), max_diff_lines, "diff")
     context = context_sections(repo, max_lines)
+    verification_block = (
+        f"\n{verification_checklist_section(verification_checklist, max_verification_lines)}"
+        if verification_checklist
+        else ""
+    )
 
     file_block = "\n".join(f"- `{path}`" for path in files) if files else "- No changed files detected."
     context_block = "\n\n".join(context) if context else "_No top-level repo context files found._"
@@ -184,6 +206,7 @@ Base: `{base_label}`
 ```diff
 {diff_block}
 ```
+{verification_block}
 
 ## Suggested Review Prompt
 
@@ -201,6 +224,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--context-lines", type=int, default=80, help="Max lines per context file.")
     parser.add_argument("--untracked-lines", type=int, default=80, help="Max preview lines per untracked text file.")
     parser.add_argument("--diff-lines", type=positive_int, help="Max lines for the combined diff block.")
+    parser.add_argument("--verification-checklist", help="Optional Markdown checklist to include in the packet.")
+    parser.add_argument("--verification-lines", type=positive_int, default=120, help="Max lines for the verification checklist block.")
     parser.add_argument("--output", help="Optional output file path. Defaults to stdout.")
     return parser.parse_args()
 
@@ -222,6 +247,8 @@ def main() -> int:
         args.context_lines,
         args.untracked_lines,
         args.diff_lines,
+        pathlib.Path(args.verification_checklist).resolve() if args.verification_checklist else None,
+        args.verification_lines,
     )
     if args.output:
         pathlib.Path(args.output).write_text(packet, encoding="utf-8")
