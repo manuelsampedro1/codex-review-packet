@@ -15,7 +15,7 @@ The problem: most AI review output gets generic when the model sees only a diff 
 - Can embed a `repo-flightcheck --json` report or `repo-flightcheck --contract` artifact so review packets include repo setup risks before the diff.
 - Can embed GitHub Actions run JSON so review packets carry CI status, conclusion, URL, branch, and SHA.
 - Can embed a Markdown verification checklist or a `verify-by-change --json-envelope` artifact.
-- Can invoke a local `verify-by-change` executable or `.py` script directly and embed the generated checklist.
+- Can invoke a local `verify-by-change` executable or `.py` script directly, request its JSON envelope when supported, and embed the generated checklist as Markdown.
 - Writes one Markdown packet that can be pasted into Codex or attached to another review workflow.
 
 ## Why This Exists
@@ -89,6 +89,8 @@ python3 codex_review_packet.py \
   --verify-by-change /path/to/verify-by-change/verify_by_change.py \
   --output review-packet.md
 ```
+
+Current `verify-by-change` versions are invoked with `--json-envelope` so the packet can render changed files, categories, commands, and source metadata instead of raw JSON. Older compatible scripts that do not support `--json-envelope` fall back to plain Markdown checklist output.
 
 Review packet with repo readiness context:
 
@@ -184,6 +186,7 @@ python3 /Users/manuelsampedro/Documents/Codex/2026-05-24/flagships/verify-by-cha
 python3 codex_review_packet.py --repo . --verification-checklist /tmp/verification-envelope.json >/tmp/review-packet-with-envelope.md
 printf 'import sys\nprint("# Verification Checklist")\nprint("## Generated")\nprint("- args: " + " ".join(sys.argv[1:]))\n' >/tmp/fake_verify_by_change.py
 python3 codex_review_packet.py --repo . --verify-by-change /tmp/fake_verify_by_change.py >/tmp/review-packet-generated-checklist.md
+python3 codex_review_packet.py --repo . --verify-by-change /Users/manuelsampedro/Documents/Codex/2026-05-24/flagships/verify-by-change/verify_by_change.py >/tmp/review-packet-generated-envelope.md
 python3 codex_review_packet.py --repo . --readiness-report examples/readiness-report.json >/tmp/review-packet-with-readiness.md
 node /path/to/repo-flightcheck/bin/repo-flightcheck.js . --contract > /tmp/repo-readiness-contract.json
 python3 codex_review_packet.py --repo . --readiness-report /tmp/repo-readiness-contract.json >/tmp/review-packet-with-readiness-contract.md
@@ -192,6 +195,7 @@ python3 codex_review_packet.py --repo . --ci-run /tmp/ci-run.json >/tmp/review-p
 grep -q '## Review Map' /tmp/review-packet.md
 grep -q 'Envelope: `verify-by-change.v1`' /tmp/review-packet-with-envelope.md
 grep -q 'verify-by-change:' /tmp/review-packet-generated-checklist.md
+grep -q 'Envelope: `verify-by-change.v1`' /tmp/review-packet-generated-envelope.md
 grep -q '## Repo Readiness' /tmp/review-packet-with-readiness.md
 grep -q 'Contract: `repo-flightcheck.agent-contract.v1`' /tmp/review-packet-with-readiness-contract.md
 grep -q '## CI Evidence' /tmp/review-packet-with-ci.md

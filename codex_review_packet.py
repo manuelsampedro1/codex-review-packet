@@ -345,11 +345,19 @@ def verification_envelope_markdown(payload: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip()
 
 
-def verify_by_change_command(command: str, repo: pathlib.Path, base: str | None, staged: bool) -> str:
+def verify_by_change_command(
+    command: str,
+    repo: pathlib.Path,
+    base: str | None,
+    staged: bool,
+    json_envelope: bool = False,
+) -> str:
     command_path = pathlib.Path(command)
     args = [str(command_path), "--repo", str(repo)]
     if command_path.suffix == ".py":
         args = [sys.executable, *args]
+    if json_envelope:
+        args.append("--json-envelope")
     if staged:
         args.append("--staged")
     elif base:
@@ -362,6 +370,19 @@ def verify_by_change_command(command: str, repo: pathlib.Path, base: str | None,
     return result.stdout
 
 
+def unsupported_json_envelope_error(message: str) -> bool:
+    lower = message.lower()
+    return "--json-envelope" in lower and any(
+        phrase in lower
+        for phrase in (
+            "unrecognized",
+            "unknown",
+            "invalid option",
+            "no such option",
+        )
+    )
+
+
 def generated_verification_checklist_section(
     command: str,
     repo: pathlib.Path,
@@ -369,7 +390,17 @@ def generated_verification_checklist_section(
     staged: bool,
     max_lines: int,
 ) -> str:
-    text = verify_by_change_command(command, repo, base, staged)
+    try:
+        text = verify_by_change_command(command, repo, base, staged, json_envelope=True)
+    except SystemExit as exc:
+        message = str(exc)
+        if not unsupported_json_envelope_error(message):
+            raise
+        text = verify_by_change_command(command, repo, base, staged)
+
+    envelope = parse_verification_envelope(text)
+    if envelope is not None:
+        return verification_envelope_section(f"verify-by-change: {command}", envelope, max_lines)
     return verification_text_section(f"verify-by-change: {command}", text, max_lines)
 
 

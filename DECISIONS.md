@@ -89,3 +89,13 @@ Rationale:
 - Automation-friendly artifacts should still be readable in the final review packet.
 - The envelope preserves source metadata while the packet presents changed files and commands in reviewer-friendly Markdown.
 - Keeping this behind the existing optional checklist input avoids a hard dependency on `verify-by-change`.
+
+## Generated Verification Envelopes
+
+When `--verify-by-change` is used, ask the generator for `--json-envelope` first and render the envelope as Markdown. Fall back to plain Markdown only when the supplied generator does not support that option.
+
+Rationale:
+
+- Direct generation should preserve the same source metadata as externally supplied envelope artifacts.
+- Review packets become more useful for automation handoffs when changed files, categories, and commands are structured before rendering.
+- The fallback keeps older local scripts usable without weakening current `verify-by-change` integration.

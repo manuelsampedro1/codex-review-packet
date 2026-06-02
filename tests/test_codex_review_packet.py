@@ -308,7 +308,48 @@ class ReviewPacketTests(unittest.TestCase):
             self.assertIn(f"Source: `verify-by-change: {script}`", packet)
             self.assertIn("## Generated", packet)
             self.assertIn("--repo", packet)
+            self.assertIn("--json-envelope", packet)
             self.assertIn(str(repo), packet)
+
+    def test_generated_verification_checklist_renders_verify_by_change_envelope(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw) / "repo"
+            repo.mkdir()
+            init_repo(repo)
+            (repo / "README.md").write_text("changed\n", encoding="utf-8")
+            script = pathlib.Path(raw) / "verify_by_change.py"
+            script.write_text(
+                "import json, sys\n"
+                "repo = sys.argv[sys.argv.index('--repo') + 1]\n"
+                "print(json.dumps({\n"
+                "  'schema_version': 'verify-by-change.v1',\n"
+                "  'source': {'type': 'git', 'repo': repo},\n"
+                "  'changed_files': ['README.md'],\n"
+                "  'empty': False,\n"
+                "  'categories': {\n"
+                "    'docs': {\n"
+                "      'files': ['README.md'],\n"
+                "      'commands': ['Review rendered Markdown and verify links if public-facing.']\n"
+                "    }\n"
+                "  }\n"
+                "}))\n",
+                encoding="utf-8",
+            )
+
+            section = generated_verification_checklist_section(
+                str(script),
+                repo,
+                base=None,
+                staged=False,
+                max_lines=40,
+            )
+
+            self.assertIn("Envelope: `verify-by-change.v1`", section)
+            self.assertIn(f"Verification source: `git, repo={repo}`", section)
+            self.assertIn("Changed files:", section)
+            self.assertIn("## Docs", section)
+            self.assertIn("Review rendered Markdown", section)
+            self.assertNotIn('"schema_version"', section)
 
     def test_generated_verification_checklist_forwards_staged_mode(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -334,6 +375,36 @@ class ReviewPacketTests(unittest.TestCase):
             )
 
             self.assertIn("--staged", section)
+
+    def test_generated_verification_checklist_falls_back_for_older_verify_by_change(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw) / "repo"
+            repo.mkdir()
+            init_repo(repo)
+            (repo / "README.md").write_text("changed\n", encoding="utf-8")
+            script = pathlib.Path(raw) / "verify_by_change.py"
+            script.write_text(
+                "import sys\n"
+                "if '--json-envelope' in sys.argv:\n"
+                "    print('error: unrecognized arguments: --json-envelope', file=sys.stderr)\n"
+                "    raise SystemExit(2)\n"
+                "print('# Verification Checklist')\n"
+                "print('## Generated')\n"
+                "print('- args: ' + ' '.join(sys.argv[1:]))\n",
+                encoding="utf-8",
+            )
+
+            section = generated_verification_checklist_section(
+                str(script),
+                repo,
+                base=None,
+                staged=False,
+                max_lines=20,
+            )
+
+            self.assertIn("## Generated", section)
+            self.assertIn("--repo", section)
+            self.assertNotIn("--json-envelope", section)
 
     def test_readiness_report_section_summarizes_repo_flightcheck_json(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
