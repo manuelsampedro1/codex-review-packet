@@ -474,6 +474,10 @@ def parse_verification_envelope(text: str) -> dict[str, Any] | None:
 def verification_envelope_section(source: str, payload: dict[str, Any], max_lines: int) -> str:
     schema = str(payload.get("schema_version", "unknown"))
     source_label = verification_source_label(payload.get("source"))
+    context_lines = verification_envelope_context_lines(payload)
+    context = "\n".join(context_lines)
+    if context:
+        context = f"\n{context}\n"
     body = verification_envelope_markdown(payload)
     body = limit_lines(body, max_lines, "verification checklist")
     return f"""## Verification Checklist
@@ -481,6 +485,7 @@ def verification_envelope_section(source: str, payload: dict[str, Any], max_line
 Source: `{source}`
 Envelope: `{schema}`
 Verification source: `{source_label}`
+{context}
 
 ```md
 {body}
@@ -507,6 +512,35 @@ def verification_source_label(source: object) -> str:
     if source.get("include_working_tree"):
         details.append("include_working_tree=true")
     return ", ".join(details)
+
+
+def verification_envelope_context_lines(payload: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    task_contract = payload.get("task_contract")
+    if isinstance(task_contract, dict):
+        status = str(task_contract.get("status") or "unknown")
+        required_sections = str(
+            task_contract.get("required_sections")
+            or task_contract.get("requiredSections")
+            or "unknown"
+        )
+        lines.append(f"Task contract: `{status}` ({required_sections} required sections)")
+        source = task_contract.get("source")
+        if source:
+            lines.append(f"Task contract source: `{source}`")
+        missing = verification_envelope_list(task_contract.get("missing_sections"))
+        placeholders = verification_envelope_list(task_contract.get("placeholder_markers"))
+        if missing:
+            lines.append(f"Missing task sections: {', '.join(missing)}")
+        if placeholders:
+            lines.append(f"Task contract placeholders: {', '.join(placeholders)}")
+    return lines
+
+
+def verification_envelope_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item).strip()]
 
 
 def verification_envelope_markdown(payload: dict[str, Any]) -> str:

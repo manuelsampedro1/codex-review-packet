@@ -26,6 +26,7 @@ from codex_review_packet import (  # noqa: E402
     task_contract_section,
     untracked_file_diff,
     verification_checklist_section,
+    verification_envelope_section,
     verification_envelope_markdown,
 )
 
@@ -345,6 +346,13 @@ placeholder
   },
   "changed_files": ["README.md", "verify_by_change.py"],
   "empty": false,
+  "task_contract": {
+    "source": "/tmp/AGENT_TASK.md",
+    "status": "pass",
+    "required_sections": "8/8",
+    "missing_sections": [],
+    "placeholder_markers": []
+  },
   "categories": {
     "docs": {
       "files": ["README.md"],
@@ -364,11 +372,43 @@ placeholder
 
             self.assertIn("Envelope: `verify-by-change.v1`", section)
             self.assertIn("Verification source: `review_packet, review_packet=/tmp/review-packet.md`", section)
+            self.assertIn("Task contract: `pass` (8/8 required sections)", section)
+            self.assertIn("Task contract source: `/tmp/AGENT_TASK.md`", section)
             self.assertIn("Changed files:", section)
             self.assertIn("- `verify_by_change.py`", section)
             self.assertIn("## Python", section)
             self.assertIn("Run `python3 -m py_compile`", section)
             self.assertNotIn('"schema_version"', section)
+
+    def test_verification_envelope_section_summarizes_task_contract_gaps(self) -> None:
+        section = verification_envelope_section(
+            "/tmp/verification-envelope.json",
+            {
+                "schema_version": "verify-by-change.v1",
+                "source": {"type": "review_packet"},
+                "changed_files": ["README.md"],
+                "empty": False,
+                "task_contract": {
+                    "source": "/tmp/AGENT_TASK.md",
+                    "status": "warn",
+                    "required_sections": "6/8",
+                    "missing_sections": ["Risks", "Out of Scope"],
+                    "placeholder_markers": ["Objective"],
+                },
+                "categories": {
+                    "docs": {
+                        "files": ["README.md"],
+                        "commands": ["Review rendered Markdown."],
+                    },
+                },
+            },
+            max_lines=40,
+        )
+
+        self.assertIn("Task contract: `warn` (6/8 required sections)", section)
+        self.assertIn("Missing task sections: Risks, Out of Scope", section)
+        self.assertIn("Task contract placeholders: Objective", section)
+        self.assertIn("## Docs", section)
 
     def test_verification_envelope_markdown_handles_empty_envelope(self) -> None:
         markdown = verification_envelope_markdown({

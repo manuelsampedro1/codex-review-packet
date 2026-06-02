@@ -106,7 +106,7 @@ python3 codex_review_packet.py \
   --output review-packet.md
 ```
 
-Current `verify-by-change` versions are invoked with `--json-envelope` so the packet can render changed files, categories, commands, and source metadata instead of raw JSON. Older compatible scripts that do not support `--json-envelope` fall back to plain Markdown checklist output.
+Current `verify-by-change` versions are invoked with `--json-envelope` so the packet can render changed files, categories, commands, source metadata, and task-contract status instead of raw JSON. Older compatible scripts that do not support `--json-envelope` fall back to plain Markdown checklist output.
 
 Review packet with repo readiness context:
 

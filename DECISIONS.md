@@ -110,6 +110,16 @@ Rationale:
 - Review packets become more useful for automation handoffs when changed files, categories, and commands are structured before rendering.
 - The fallback keeps older local scripts usable without weakening current `verify-by-change` integration.
 
+## Task Contract Metadata in Verification Envelopes
+
+When a `verify-by-change.v1` envelope includes `task_contract`, render a compact task-contract status summary before the Markdown checklist body.
+
+Rationale:
+
+- Reviewers should see whether a generated verification plan came from a complete scoped task without opening raw JSON.
+- The summary stays outside the fenced checklist body so packet parsers do not confuse it with top-level packet sections.
+- Missing sections and placeholders are review context, not command success, so they stay separate from the checklist commands.
+
 ## Surface Sensitive Changes Separately
 
 Add a `Sensitive Change Check` section when changed paths include secret material, authorization or approval logic, receipts, guards, deploy paths, release paths, or workflows.
