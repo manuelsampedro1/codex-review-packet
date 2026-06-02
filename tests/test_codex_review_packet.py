@@ -12,8 +12,10 @@ sys.path.insert(0, str(ROOT))
 from codex_review_packet import (  # noqa: E402
     build_packet,
     changed_files,
+    ci_run_section,
     generated_verification_checklist_section,
     limit_lines,
+    normalize_ci_run_payload,
     parse_status_paths,
     parse_verification_envelope,
     readiness_report_section,
@@ -475,6 +477,52 @@ class ReviewPacketTests(unittest.TestCase):
             self.assertIn("No required blockers or recommendations.", section)
             self.assertNotIn("Required before agent:", section)
 
+    def test_ci_run_section_summarizes_github_actions_run(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            report = pathlib.Path(raw) / "ci-run.json"
+            report.write_text(
+                """{
+  "id": 123,
+  "name": "CI",
+  "status": "completed",
+  "conclusion": "success",
+  "head_branch": "main",
+  "head_sha": "abc123",
+  "event": "push",
+  "html_url": "https://github.com/example/repo/actions/runs/123"
+}
+""",
+                encoding="utf-8",
+            )
+
+            section = ci_run_section(report)
+
+            self.assertIn("## CI Evidence", section)
+            self.assertIn(f"Source: `{report}`", section)
+            self.assertIn("Run: `123`", section)
+            self.assertIn("Workflow: `CI`", section)
+            self.assertIn("Status: `completed`", section)
+            self.assertIn("Conclusion: `success`", section)
+            self.assertIn("Branch: `main`", section)
+            self.assertIn("SHA: `abc123`", section)
+            self.assertIn("URL: <https://github.com/example/repo/actions/runs/123>", section)
+
+    def test_ci_run_section_accepts_workflow_runs_list_payload(self) -> None:
+        payload = normalize_ci_run_payload({
+            "workflow_runs": [
+                {
+                    "id": 456,
+                    "name": "build",
+                    "status": "in_progress",
+                    "conclusion": None,
+                }
+            ]
+        })
+
+        self.assertEqual(payload["id"], "456")
+        self.assertEqual(payload["status"], "in_progress")
+        self.assertEqual(payload["conclusion"], "null")
+
     def test_packet_can_include_repo_readiness_report(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             repo = pathlib.Path(raw) / "repo"
@@ -510,6 +558,39 @@ class ReviewPacketTests(unittest.TestCase):
 
             self.assertIn("## Repo Readiness", packet)
             self.assertIn("Score: `100/100`", packet)
+            self.assertIn("## Diff", packet)
+
+    def test_packet_can_include_ci_run_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw) / "repo"
+            repo.mkdir()
+            init_repo(repo)
+            (repo / "README.md").write_text("changed\n", encoding="utf-8")
+            ci_run = pathlib.Path(raw) / "ci-run.json"
+            ci_run.write_text(
+                """{
+  "id": 123,
+  "name": "CI",
+  "status": "completed",
+  "conclusion": "success",
+  "head_sha": "abc123"
+}
+""",
+                encoding="utf-8",
+            )
+
+            packet = build_packet(
+                repo,
+                base=None,
+                staged=False,
+                max_lines=20,
+                ci_run=ci_run,
+            )
+
+            self.assertIn("## CI Evidence", packet)
+            self.assertIn("Run: `123`", packet)
+            self.assertIn("Conclusion: `success`", packet)
+            self.assertIn("SHA: `abc123`", packet)
             self.assertIn("## Diff", packet)
 
     def test_cli_writes_output_file(self) -> None:
@@ -701,6 +782,48 @@ class ReviewPacketTests(unittest.TestCase):
             content = out.read_text(encoding="utf-8")
             self.assertIn("## Repo Readiness", content)
             self.assertIn("Score: `100/100`", content)
+
+    def test_cli_writes_packet_with_ci_run_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw) / "repo"
+            repo.mkdir()
+            init_repo(repo)
+            (repo / "README.md").write_text("changed\n", encoding="utf-8")
+            ci_run = pathlib.Path(raw) / "ci-run.json"
+            ci_run.write_text(
+                """{
+  "id": 123,
+  "name": "CI",
+  "status": "completed",
+  "conclusion": "success",
+  "html_url": "https://github.com/example/repo/actions/runs/123"
+}
+""",
+                encoding="utf-8",
+            )
+            out = pathlib.Path(raw) / "packet.md"
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "codex_review_packet.py"),
+                    "--repo",
+                    str(repo),
+                    "--ci-run",
+                    str(ci_run),
+                    "--output",
+                    str(out),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            self.assertIn("Wrote review packet", result.stdout)
+            content = out.read_text(encoding="utf-8")
+            self.assertIn("## CI Evidence", content)
+            self.assertIn("Conclusion: `success`", content)
+            self.assertIn("URL: <https://github.com/example/repo/actions/runs/123>", content)
 
 
 if __name__ == "__main__":

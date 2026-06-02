@@ -427,6 +427,67 @@ def readiness_report_section(path: pathlib.Path, max_checks: int) -> str:
     return "\n".join(parts).rstrip() + "\n"
 
 
+def ci_run_section(path: pathlib.Path) -> str:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    run = normalize_ci_run_payload(payload)
+
+    parts = [
+        "## CI Evidence",
+        "",
+        f"Source: `{path}`",
+        "",
+        f"- Run: `{run['id']}`",
+        f"- Workflow: `{run['name']}`",
+        f"- Status: `{run['status']}`",
+        f"- Conclusion: `{run['conclusion']}`",
+    ]
+
+    if run["head_branch"]:
+        parts.append(f"- Branch: `{run['head_branch']}`")
+    if run["head_sha"]:
+        parts.append(f"- SHA: `{run['head_sha']}`")
+    if run["event"]:
+        parts.append(f"- Event: `{run['event']}`")
+    if run["html_url"]:
+        parts.append(f"- URL: <{run['html_url']}>")
+
+    parts.append("")
+    return "\n".join(parts)
+
+
+def normalize_ci_run_payload(payload: dict[str, Any]) -> dict[str, str]:
+    if not isinstance(payload, dict):
+        raise SystemExit("CI run report must be a JSON object.")
+
+    if isinstance(payload.get("workflow_runs"), list):
+        runs = payload["workflow_runs"]
+        if not runs:
+            raise SystemExit("CI run list is empty.")
+        payload = runs[0]
+
+    if not isinstance(payload, dict):
+        raise SystemExit("CI run report entry must be a JSON object.")
+
+    run_id = payload.get("id") or payload.get("run_id")
+    name = payload.get("name") or payload.get("workflow_name")
+    status = payload.get("status")
+
+    if not run_id or not name or not status:
+        raise SystemExit("CI run report must include id, name, and status.")
+
+    conclusion = payload.get("conclusion")
+    return {
+        "id": str(run_id),
+        "name": str(name),
+        "status": str(status),
+        "conclusion": "null" if conclusion is None else str(conclusion),
+        "head_branch": str(payload.get("head_branch") or ""),
+        "head_sha": str(payload.get("head_sha") or ""),
+        "event": str(payload.get("event") or ""),
+        "html_url": str(payload.get("html_url") or ""),
+    }
+
+
 def readiness_contract_section(path: pathlib.Path, payload: dict[str, Any], max_checks: int) -> str:
     required: list[dict[str, Any]] = payload.get("requiredBeforeAgent", [])
     recommended: list[dict[str, Any]] = payload.get("recommendedBeforeAgent", [])
@@ -490,6 +551,7 @@ def build_packet(
     max_verification_lines: int = 120,
     readiness_report: pathlib.Path | None = None,
     max_readiness_checks: int = 8,
+    ci_run: pathlib.Path | None = None,
 ) -> str:
     files = changed_files(repo, base, staged)
     diff = limit_lines(diff_body(repo, base, staged, max_untracked_lines).strip(), max_diff_lines, "diff")
@@ -506,6 +568,11 @@ def build_packet(
     readiness_block = (
         f"\n{readiness_report_section(readiness_report, max_readiness_checks)}"
         if readiness_report
+        else ""
+    )
+    ci_block = (
+        f"\n{ci_run_section(ci_run)}"
+        if ci_run
         else ""
     )
 
@@ -531,6 +598,7 @@ Base: `{base_label}`
 
 {context_block}
 {readiness_block}
+{ci_block}
 
 ## Diff
 
@@ -563,6 +631,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--verification-lines", type=positive_int, default=120, help="Max lines for the verification checklist block.")
     parser.add_argument("--readiness-report", help="Optional repo-flightcheck JSON report to include in the packet.")
     parser.add_argument("--readiness-checks", type=positive_int, default=8, help="Max warning or failed readiness checks to include.")
+    parser.add_argument("--ci-run", help="Optional GitHub Actions run JSON to include in the packet.")
     parser.add_argument("--output", help="Optional output file path. Defaults to stdout.")
     return parser.parse_args()
 
@@ -591,6 +660,7 @@ def main() -> int:
         args.verification_lines,
         pathlib.Path(args.readiness_report).resolve() if args.readiness_report else None,
         args.readiness_checks,
+        pathlib.Path(args.ci_run).resolve() if args.ci_run else None,
     )
     if args.output:
         pathlib.Path(args.output).write_text(packet, encoding="utf-8")

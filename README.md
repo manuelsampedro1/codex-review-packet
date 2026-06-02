@@ -13,6 +13,7 @@ The problem: most AI review output gets generic when the model sees only a diff 
 - Builds a review map that routes changed files into review lanes such as CI, security, tests, docs, agent instructions, and application code.
 - Can cap the combined diff block so large packets stay usable in model context.
 - Can embed a `repo-flightcheck --json` report or `repo-flightcheck --contract` artifact so review packets include repo setup risks before the diff.
+- Can embed GitHub Actions run JSON so review packets carry CI status, conclusion, URL, branch, and SHA.
 - Can embed a Markdown verification checklist or a `verify-by-change --json-envelope` artifact.
 - Can invoke a local `verify-by-change` executable or `.py` script directly and embed the generated checklist.
 - Writes one Markdown packet that can be pasted into Codex or attached to another review workflow.
@@ -107,6 +108,19 @@ python3 codex_review_packet.py \
 
 The repo also includes a small sample report at `examples/readiness-report.json` for local smoke tests.
 
+Review packet with GitHub Actions CI evidence:
+
+```sh
+curl -fsS \
+  https://api.github.com/repos/OWNER/REPO/actions/runs/RUN_ID \
+  > /tmp/ci-run.json
+
+python3 codex_review_packet.py \
+  --repo /path/to/repo \
+  --ci-run /tmp/ci-run.json \
+  --output review-packet.md
+```
+
 ## Example Output
 
 ````md
@@ -133,6 +147,11 @@ Focus: Check user-facing claims, decisions, runbooks, and TODO follow-through.
 ## Repo Readiness
 Score: `84/100`
 ...
+
+## CI Evidence
+- Status: `completed`
+- Conclusion: `success`
+- URL: <https://github.com/OWNER/REPO/actions/runs/RUN_ID>
 
 ## Diff
 ```diff
@@ -168,11 +187,14 @@ python3 codex_review_packet.py --repo . --verify-by-change /tmp/fake_verify_by_c
 python3 codex_review_packet.py --repo . --readiness-report examples/readiness-report.json >/tmp/review-packet-with-readiness.md
 node /path/to/repo-flightcheck/bin/repo-flightcheck.js . --contract > /tmp/repo-readiness-contract.json
 python3 codex_review_packet.py --repo . --readiness-report /tmp/repo-readiness-contract.json >/tmp/review-packet-with-readiness-contract.md
+printf '{"id":123,"name":"CI","status":"completed","conclusion":"success","html_url":"https://github.com/example/repo/actions/runs/123","head_sha":"abc123"}\n' >/tmp/ci-run.json
+python3 codex_review_packet.py --repo . --ci-run /tmp/ci-run.json >/tmp/review-packet-with-ci.md
 grep -q '## Review Map' /tmp/review-packet.md
 grep -q 'Envelope: `verify-by-change.v1`' /tmp/review-packet-with-envelope.md
 grep -q 'verify-by-change:' /tmp/review-packet-generated-checklist.md
 grep -q '## Repo Readiness' /tmp/review-packet-with-readiness.md
 grep -q 'Contract: `repo-flightcheck.agent-contract.v1`' /tmp/review-packet-with-readiness-contract.md
+grep -q '## CI Evidence' /tmp/review-packet-with-ci.md
 test -s /tmp/review-packet.md
 ```
 
