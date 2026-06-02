@@ -21,6 +21,7 @@ from codex_review_packet import (  # noqa: E402
     readiness_report_section,
     review_lane_for_path,
     review_map_section,
+    sensitive_change_section,
     untracked_file_diff,
     verification_checklist_section,
     verification_envelope_markdown,
@@ -80,6 +81,30 @@ class ReviewPacketTests(unittest.TestCase):
         self.assertIn("### Tests and verification", section)
         self.assertIn("### Application code", section)
 
+    def test_sensitive_change_section_flags_secrets_auth_and_deploy_paths(self) -> None:
+        section = sensitive_change_section([
+            ".env",
+            "config/private-key.pem",
+            "permission_protocol/client.py",
+            "src/approval-server.ts",
+            "scripts/deploy.sh",
+            ".github/workflows/release.yml",
+        ])
+
+        self.assertIn("## Sensitive Change Check", section)
+        self.assertIn("### Secret material", section)
+        self.assertIn("- `.env`", section)
+        self.assertIn("- `config/private-key.pem`", section)
+        self.assertIn("### Authorization and approval", section)
+        self.assertIn("- `permission_protocol/client.py`", section)
+        self.assertIn("- `src/approval-server.ts`", section)
+        self.assertIn("### Deploy or release path", section)
+        self.assertIn("- `scripts/deploy.sh`", section)
+        self.assertIn("- `.github/workflows/release.yml`", section)
+
+    def test_sensitive_change_section_is_empty_for_routine_paths(self) -> None:
+        self.assertEqual(sensitive_change_section(["README.md", "src/app.py"]), "")
+
     def test_working_tree_packet_includes_staged_unstaged_and_untracked_content(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             repo = pathlib.Path(raw)
@@ -102,6 +127,27 @@ class ReviewPacketTests(unittest.TestCase):
             self.assertIn("+unstaged", packet)
             self.assertIn("diff --git a/notes.md b/notes.md", packet)
             self.assertIn("+untracked note", packet)
+
+    def test_working_tree_packet_includes_sensitive_change_check(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw)
+            init_repo(repo)
+
+            (repo / ".env").write_text("PP_API_KEY=example-placeholder\n", encoding="utf-8")
+            (repo / "permission_protocol").mkdir()
+            (repo / "permission_protocol" / "client.py").write_text("print('approval path')\n", encoding="utf-8")
+            (repo / "scripts").mkdir()
+            (repo / "scripts" / "deploy.sh").write_text("echo deploy\n", encoding="utf-8")
+
+            packet = build_packet(repo, base=None, staged=False, max_lines=20, max_untracked_lines=10)
+
+            self.assertIn("## Sensitive Change Check", packet)
+            self.assertIn("### Secret material", packet)
+            self.assertIn("- `.env`", packet)
+            self.assertIn("### Authorization and approval", packet)
+            self.assertIn("- `permission_protocol/client.py`", packet)
+            self.assertIn("### Deploy or release path", packet)
+            self.assertIn("- `scripts/deploy.sh`", packet)
 
     def test_staged_packet_excludes_unstaged_and_untracked_content(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

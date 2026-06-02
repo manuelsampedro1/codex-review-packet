@@ -99,3 +99,13 @@ Rationale:
 - Direct generation should preserve the same source metadata as externally supplied envelope artifacts.
 - Review packets become more useful for automation handoffs when changed files, categories, and commands are structured before rendering.
 - The fallback keeps older local scripts usable without weakening current `verify-by-change` integration.
+
+## Surface Sensitive Changes Separately
+
+Add a `Sensitive Change Check` section when changed paths include secret material, authorization or approval logic, receipts, guards, deploy paths, release paths, or workflows.
+
+Rationale:
+
+- Review lanes are useful, but high-risk paths need a second explicit callout so they are not treated as routine code or docs.
+- Agent-generated closeouts should verify negative paths, fail-closed behavior, rollback, and leakage risk before claiming safety.
+- The rule is path-based and conservative; it asks sharper review questions without pretending to perform a security scan.

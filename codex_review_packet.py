@@ -24,6 +24,38 @@ REVIEW_LANE_GUIDANCE = {
     "Unmapped": "Check manually; this path did not match a known review lane.",
 }
 
+SENSITIVE_CHANGE_GUIDANCE = {
+    "Secret material": "Confirm no real credentials, private keys, tokens, webhook URLs, or production identifiers are present. If a real secret appears, rotate it before merge.",
+    "Authorization and approval": "Check allow, deny, expiry, malformed-input, missing-approval, and failure paths; do not verify only the happy path.",
+    "Deploy or release path": "Check fail-closed behavior, environment assumptions, rollback path, and whether production actions require explicit approval.",
+}
+
+SECRET_FILENAMES = {
+    ".env",
+    ".env.local",
+    ".env.production",
+    ".env.development",
+    ".env.test",
+}
+SECRET_SUFFIXES = {".pem", ".key", ".p12", ".pfx"}
+SECRET_TOKENS = {"secret", "secrets", "credential", "credentials", "token", "tokens", "private", "key"}
+AUTH_TOKENS = {
+    "auth",
+    "authorize",
+    "authorization",
+    "approval",
+    "approvals",
+    "guard",
+    "permission",
+    "permissions",
+    "policy",
+    "policies",
+    "receipt",
+    "receipts",
+    "security",
+}
+DEPLOY_TOKENS = {"deploy", "deployment", "release", "rollback"}
+
 CODE_SUFFIXES = (
     ".cjs",
     ".css",
@@ -124,7 +156,7 @@ def review_lane_for_path(path: str) -> str:
         return "Agent instructions"
     if lower.startswith(".github/workflows/") or any(part in lower for part in ("deploy", "release", "ci.yml", "ci.yaml")):
         return "CI and release"
-    if any(part in lower for part in ("auth", "secret", "token", "permission", "security", "keychain", "credential")):
+    if secret_material_path(lower) or auth_sensitive_path(lower) or "keychain" in lower:
         return "Security and permissions"
     if any(part in lower for part in ("migration", "schema", "database", "storage", "localstorage", "prisma", "supabase")) or lower.endswith(".sql"):
         return "Data and persistence"
@@ -135,6 +167,80 @@ def review_lane_for_path(path: str) -> str:
     if lower.endswith(CODE_SUFFIXES):
         return "Application code"
     return "Unmapped"
+
+
+def path_tokens(normalized: str) -> set[str]:
+    tokens: set[str] = set()
+    for segment in normalized.replace("\\", "/").replace("@", "/").split("/"):
+        tokens.update(token_parts(segment))
+    return tokens
+
+
+def token_parts(value: str) -> list[str]:
+    parts: list[str] = []
+    current = []
+    for character in value.lower():
+        if character.isalnum():
+            current.append(character)
+            continue
+        if current:
+            parts.append("".join(current))
+            current = []
+    if current:
+        parts.append("".join(current))
+    return parts
+
+
+def secret_material_path(normalized: str) -> bool:
+    path = pathlib.PurePosixPath(normalized.replace("\\", "/"))
+    if path.name in SECRET_FILENAMES or path.suffix in SECRET_SUFFIXES:
+        return True
+    return bool(path_tokens(normalized) & SECRET_TOKENS)
+
+
+def auth_sensitive_path(normalized: str) -> bool:
+    return bool(path_tokens(normalized) & AUTH_TOKENS)
+
+
+def deploy_sensitive_path(normalized: str) -> bool:
+    return normalized.startswith(".github/workflows/") or bool(path_tokens(normalized) & DEPLOY_TOKENS)
+
+
+def sensitive_change_map(files: list[str]) -> dict[str, list[str]]:
+    buckets: dict[str, list[str]] = {}
+    for path in files:
+        normalized = path.replace("\\", "/").lower()
+        if secret_material_path(normalized):
+            buckets.setdefault("Secret material", []).append(path)
+        if auth_sensitive_path(normalized):
+            buckets.setdefault("Authorization and approval", []).append(path)
+        if deploy_sensitive_path(normalized):
+            buckets.setdefault("Deploy or release path", []).append(path)
+    return buckets
+
+
+def sensitive_change_section(files: list[str]) -> str:
+    buckets = sensitive_change_map(files)
+    if not buckets:
+        return ""
+
+    parts = [
+        "## Sensitive Change Check",
+        "",
+        "These paths need explicit risk review before merge.",
+        "",
+    ]
+    for label, guidance in SENSITIVE_CHANGE_GUIDANCE.items():
+        paths = buckets.get(label)
+        if not paths:
+            continue
+        parts.append(f"### {label}")
+        parts.append("")
+        parts.append(f"Focus: {guidance}")
+        parts.append("")
+        parts.extend(f"- `{path}`" for path in paths)
+        parts.append("")
+    return "\n".join(parts).rstrip() + "\n"
 
 
 def review_map(files: list[str]) -> dict[str, list[str]]:
@@ -609,6 +715,7 @@ def build_packet(
 
     file_block = "\n".join(f"- `{path}`" for path in files) if files else "- No changed files detected."
     review_block = review_map_section(files)
+    sensitive_block = sensitive_change_section(files)
     context_block = "\n\n".join(context) if context else "_No top-level repo context files found._"
     diff_block = diff if diff else "# No diff detected."
 
@@ -624,6 +731,7 @@ Base: `{base_label}`
 {file_block}
 
 {review_block}
+{sensitive_block}
 
 ## Repo Context
 

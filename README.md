@@ -11,6 +11,7 @@ The problem: most AI review output gets generic when the model sees only a diff 
 - In working-tree mode, includes staged, unstaged, and untracked file evidence.
 - Pulls nearby repo context from files such as `AGENTS.md`, `README.md`, `DECISIONS.md`, and `TODO.md`.
 - Builds a review map that routes changed files into review lanes such as CI, security, tests, docs, agent instructions, and application code.
+- Adds a sensitive-change check for secret material, authorization or approval paths, and deploy or release paths.
 - Can cap the combined diff block so large packets stay usable in model context.
 - Can embed a `repo-flightcheck --json` report or `repo-flightcheck --contract` artifact so review packets include repo setup risks before the diff.
 - Can embed GitHub Actions run JSON so review packets carry CI status, conclusion, URL, branch, and SHA.
@@ -141,6 +142,14 @@ Focus: Check executable gates, deploy paths, environment assumptions, and rollba
 ### Product and docs
 Focus: Check user-facing claims, decisions, runbooks, and TODO follow-through.
 - `README.md`
+
+## Sensitive Change Check
+
+These paths need explicit risk review before merge.
+
+### Deploy or release path
+Focus: Check fail-closed behavior, environment assumptions, rollback path, and whether production actions require explicit approval.
+- `scripts/deploy.sh`
 
 ## Repo Context
 ### AGENTS.md
