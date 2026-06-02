@@ -10,6 +10,7 @@ The problem: most AI review output gets generic when the model sees only a diff 
 - Collects changed files from `HEAD` against a base ref or from the index.
 - In working-tree mode, includes staged, unstaged, and untracked file evidence.
 - Pulls nearby repo context from files such as `AGENTS.md`, `README.md`, `DECISIONS.md`, and `TODO.md`.
+- Can cap the combined diff block so large packets stay usable in model context.
 - Writes one Markdown packet that can be pasted into Codex or attached to another review workflow.
 
 ## Why This Exists
@@ -38,6 +39,12 @@ Working-tree review with limited untracked previews:
 
 ```sh
 python3 codex_review_packet.py --repo /path/to/repo --untracked-lines 40 --output review-packet.md
+```
+
+Large review with a capped diff block:
+
+```sh
+python3 codex_review_packet.py --repo /path/to/repo --diff-lines 300 --output review-packet.md
 ```
 
 ## Example Output
@@ -75,6 +82,7 @@ Run from this repo:
 python3 -m py_compile codex_review_packet.py
 python3 -m unittest discover -s tests
 python3 codex_review_packet.py --repo . >/tmp/review-packet.md
+python3 codex_review_packet.py --repo . --diff-lines 80 >/tmp/review-packet-capped.md
 test -s /tmp/review-packet.md
 ```
 

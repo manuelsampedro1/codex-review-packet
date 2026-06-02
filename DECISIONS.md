@@ -29,3 +29,13 @@ Rationale:
 - Codex review packets should match what a reviewer actually needs to inspect.
 - Listing an untracked file without showing any content weakens the handoff.
 - Staged-only mode remains available when the reviewer intentionally wants the index.
+
+## Bounded Diff Context
+
+Allow callers to cap the combined diff block with `--diff-lines`.
+
+Rationale:
+
+- Review packets should stay useful inside model context windows.
+- Large diffs still need an honest omission marker instead of silently dropping content.
+- The default remains uncapped so local reviewers can choose the tradeoff explicitly.

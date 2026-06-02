@@ -9,7 +9,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from codex_review_packet import build_packet, changed_files, parse_status_paths, untracked_file_diff  # noqa: E402
+from codex_review_packet import build_packet, changed_files, limit_lines, parse_status_paths, untracked_file_diff  # noqa: E402
 
 
 def run(*args: str, cwd: pathlib.Path) -> None:
@@ -82,6 +82,30 @@ class ReviewPacketTests(unittest.TestCase):
             self.assertIn("+two", diff)
             self.assertIn("1 more lines omitted", diff)
             self.assertNotIn("+three", diff)
+
+    def test_limit_lines_marks_omitted_diff_lines(self) -> None:
+        limited = limit_lines("one\ntwo\nthree\nfour", max_lines=2, label="diff")
+
+        self.assertEqual(limited, "one\ntwo\n# ... 2 more diff lines omitted")
+
+    def test_packet_can_limit_combined_diff_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw)
+            init_repo(repo)
+            (repo / "README.md").write_text("initial\none\ntwo\nthree\nfour\n", encoding="utf-8")
+
+            packet = build_packet(
+                repo,
+                base=None,
+                staged=False,
+                max_lines=20,
+                max_untracked_lines=10,
+                max_diff_lines=6,
+            )
+
+            self.assertIn("# ...", packet)
+            self.assertIn("more diff lines omitted", packet)
+            self.assertNotIn("+four", packet)
 
     def test_cli_writes_output_file(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

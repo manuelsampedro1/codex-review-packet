@@ -124,6 +124,16 @@ def diff_body(repo: pathlib.Path, base: str | None, staged: bool, max_untracked_
     return working_tree_diff(repo, max_untracked_lines)
 
 
+def limit_lines(text: str, max_lines: int | None, label: str) -> str:
+    if max_lines is None:
+        return text
+    lines = text.splitlines()
+    if len(lines) <= max_lines:
+        return text
+    omitted = len(lines) - max_lines
+    return "\n".join([*lines[:max_lines], f"# ... {omitted} more {label} lines omitted"])
+
+
 def context_sections(repo: pathlib.Path, max_lines: int) -> list[str]:
     sections: list[str] = []
     for name in CONTEXT_FILES:
@@ -138,9 +148,16 @@ def context_sections(repo: pathlib.Path, max_lines: int) -> list[str]:
     return sections
 
 
-def build_packet(repo: pathlib.Path, base: str | None, staged: bool, max_lines: int, max_untracked_lines: int = 80) -> str:
+def build_packet(
+    repo: pathlib.Path,
+    base: str | None,
+    staged: bool,
+    max_lines: int,
+    max_untracked_lines: int = 80,
+    max_diff_lines: int | None = None,
+) -> str:
     files = changed_files(repo, base, staged)
-    diff = diff_body(repo, base, staged, max_untracked_lines).strip()
+    diff = limit_lines(diff_body(repo, base, staged, max_untracked_lines).strip(), max_diff_lines, "diff")
     context = context_sections(repo, max_lines)
 
     file_block = "\n".join(f"- `{path}`" for path in files) if files else "- No changed files detected."
@@ -183,14 +200,29 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--staged", action="store_true", help="Use staged changes instead of a base ref.")
     parser.add_argument("--context-lines", type=int, default=80, help="Max lines per context file.")
     parser.add_argument("--untracked-lines", type=int, default=80, help="Max preview lines per untracked text file.")
+    parser.add_argument("--diff-lines", type=positive_int, help="Max lines for the combined diff block.")
     parser.add_argument("--output", help="Optional output file path. Defaults to stdout.")
     return parser.parse_args()
+
+
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("value must be at least 1")
+    return parsed
 
 
 def main() -> int:
     args = parse_args()
     repo = pathlib.Path(args.repo).resolve()
-    packet = build_packet(repo, args.base, args.staged, args.context_lines, args.untracked_lines)
+    packet = build_packet(
+        repo,
+        args.base,
+        args.staged,
+        args.context_lines,
+        args.untracked_lines,
+        args.diff_lines,
+    )
     if args.output:
         pathlib.Path(args.output).write_text(packet, encoding="utf-8")
         print(f"Wrote review packet to {shlex.quote(args.output)}")
