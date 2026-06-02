@@ -49,3 +49,13 @@ Rationale:
 - Review packets are stronger when they include both the diff and the proposed verification plan.
 - Keeping the checklist external avoids coupling this repo to a specific verification generator.
 - A line cap keeps the packet usable in model context while preserving an explicit omission marker.
+
+## Review Map Before Diff
+
+Include a path-derived review map before repo context and diff details.
+
+Rationale:
+
+- Mixed agent diffs need routing, not only a flat changed-file list.
+- Simple lanes help reviewers focus on CI, security, data, tests, docs, agent instructions, and application code without hiding judgment behind a score.
+- The map stays deterministic and path-based so a reviewer can challenge or ignore it easily.

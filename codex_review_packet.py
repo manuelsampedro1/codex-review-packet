@@ -12,6 +12,41 @@ from typing import Iterable
 
 CONTEXT_FILES = ("AGENTS.md", "README.md", "DECISIONS.md", "TODO.md")
 
+REVIEW_LANE_GUIDANCE = {
+    "Agent instructions": "Check whether agent behavior, scope, or safety rules changed.",
+    "CI and release": "Check executable gates, deploy paths, environment assumptions, and rollback impact.",
+    "Security and permissions": "Check secrets, auth boundaries, permission checks, and sensitive operations.",
+    "Data and persistence": "Check migrations, schemas, storage formats, and data compatibility.",
+    "Tests and verification": "Check whether tests cover the behavior and whether verification commands changed.",
+    "Product and docs": "Check user-facing claims, decisions, runbooks, and TODO follow-through.",
+    "Application code": "Check correctness, regressions, edge cases, and integration behavior.",
+    "Unmapped": "Check manually; this path did not match a known review lane.",
+}
+
+CODE_SUFFIXES = (
+    ".cjs",
+    ".css",
+    ".go",
+    ".html",
+    ".java",
+    ".js",
+    ".json",
+    ".jsx",
+    ".kt",
+    ".mjs",
+    ".php",
+    ".py",
+    ".rb",
+    ".rs",
+    ".sh",
+    ".swift",
+    ".toml",
+    ".ts",
+    ".tsx",
+    ".yaml",
+    ".yml",
+)
+
 REVIEW_PROMPT = """Review this repo change like a strict senior engineer.
 
 Focus on findings that would change whether the diff should merge.
@@ -77,6 +112,55 @@ def changed_files(repo: pathlib.Path, base: str | None, staged: bool) -> list[st
     else:
         return status_paths(repo)
     return [line.strip() for line in output.splitlines() if line.strip()]
+
+
+def review_lane_for_path(path: str) -> str:
+    normalized = path.replace("\\", "/")
+    lower = normalized.lower()
+    name = pathlib.PurePosixPath(normalized).name.lower()
+
+    if name in {"agents.md", "claude.md"} or lower.startswith((".codex/", ".cursor/")):
+        return "Agent instructions"
+    if lower.startswith(".github/workflows/") or any(part in lower for part in ("deploy", "release", "ci.yml", "ci.yaml")):
+        return "CI and release"
+    if any(part in lower for part in ("auth", "secret", "token", "permission", "security", "keychain", "credential")):
+        return "Security and permissions"
+    if any(part in lower for part in ("migration", "schema", "database", "storage", "localstorage", "prisma", "supabase")) or lower.endswith(".sql"):
+        return "Data and persistence"
+    if lower.startswith(("test/", "tests/")) or any(part in lower for part in ("test_", ".test.", ".spec.", "verify", "verification")):
+        return "Tests and verification"
+    if name in {"readme.md", "decisions.md", "todo.md"} or lower.startswith(("docs/", "radar/", "recipes/", "labs/")) or lower.endswith(".md"):
+        return "Product and docs"
+    if lower.endswith(CODE_SUFFIXES):
+        return "Application code"
+    return "Unmapped"
+
+
+def review_map(files: list[str]) -> dict[str, list[str]]:
+    lanes: dict[str, list[str]] = {}
+    for path in files:
+        lane = review_lane_for_path(path)
+        lanes.setdefault(lane, []).append(path)
+    return lanes
+
+
+def review_map_section(files: list[str]) -> str:
+    if not files:
+        return "## Review Map\n\n_No review lanes; no changed files detected._\n"
+
+    lanes = review_map(files)
+    parts = ["## Review Map", ""]
+    for lane in REVIEW_LANE_GUIDANCE:
+        lane_files = lanes.get(lane)
+        if not lane_files:
+            continue
+        parts.append(f"### {lane}")
+        parts.append("")
+        parts.append(f"Focus: {REVIEW_LANE_GUIDANCE[lane]}")
+        parts.append("")
+        parts.extend(f"- `{path}`" for path in lane_files)
+        parts.append("")
+    return "\n".join(parts).rstrip() + "\n"
 
 
 def untracked_file_diff(repo: pathlib.Path, raw_path: str, max_lines: int) -> str:
@@ -183,6 +267,7 @@ def build_packet(
     )
 
     file_block = "\n".join(f"- `{path}`" for path in files) if files else "- No changed files detected."
+    review_block = review_map_section(files)
     context_block = "\n\n".join(context) if context else "_No top-level repo context files found._"
     diff_block = diff if diff else "# No diff detected."
 
@@ -196,6 +281,8 @@ Base: `{base_label}`
 ## Changed Files
 
 {file_block}
+
+{review_block}
 
 ## Repo Context
 

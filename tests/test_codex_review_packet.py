@@ -14,6 +14,8 @@ from codex_review_packet import (  # noqa: E402
     changed_files,
     limit_lines,
     parse_status_paths,
+    review_lane_for_path,
+    review_map_section,
     untracked_file_diff,
     verification_checklist_section,
 )
@@ -41,6 +43,37 @@ class ReviewPacketTests(unittest.TestCase):
             ["README.md", "script.sh", "new.txt", "scratch.js"],
         )
 
+    def test_review_lane_for_path_routes_common_agent_review_risks(self) -> None:
+        cases = {
+            "AGENTS.md": "Agent instructions",
+            ".github/workflows/ci.yml": "CI and release",
+            "src/auth/session.py": "Security and permissions",
+            "migrations/001_init.sql": "Data and persistence",
+            "tests/test_cli.py": "Tests and verification",
+            "docs/runbook.md": "Product and docs",
+            "src/app.py": "Application code",
+            "assets/logo.bin": "Unmapped",
+        }
+
+        for path, expected in cases.items():
+            with self.subTest(path=path):
+                self.assertEqual(review_lane_for_path(path), expected)
+
+    def test_review_map_section_groups_files_with_focus_prompts(self) -> None:
+        section = review_map_section([
+            "AGENTS.md",
+            ".github/workflows/ci.yml",
+            "tests/test_cli.py",
+            "src/app.py",
+        ])
+
+        self.assertIn("## Review Map", section)
+        self.assertIn("### Agent instructions", section)
+        self.assertIn("Focus: Check whether agent behavior", section)
+        self.assertIn("- `.github/workflows/ci.yml`", section)
+        self.assertIn("### Tests and verification", section)
+        self.assertIn("### Application code", section)
+
     def test_working_tree_packet_includes_staged_unstaged_and_untracked_content(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             repo = pathlib.Path(raw)
@@ -56,6 +89,9 @@ class ReviewPacketTests(unittest.TestCase):
             self.assertIn("- `staged.py`", packet)
             self.assertIn("- `README.md`", packet)
             self.assertIn("- `notes.md`", packet)
+            self.assertIn("## Review Map", packet)
+            self.assertIn("### Application code", packet)
+            self.assertIn("### Product and docs", packet)
             self.assertIn("+print('staged')", packet)
             self.assertIn("+unstaged", packet)
             self.assertIn("diff --git a/notes.md b/notes.md", packet)
