@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 from codex_review_packet import (  # noqa: E402
     build_packet,
     changed_files,
+    generated_verification_checklist_section,
     limit_lines,
     parse_status_paths,
     readiness_report_section,
@@ -184,6 +185,62 @@ class ReviewPacketTests(unittest.TestCase):
             self.assertIn("## Docs", packet)
             self.assertIn("- Review rendered Markdown.", packet)
 
+    def test_packet_can_generate_verification_checklist_with_verify_by_change_script(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw) / "repo"
+            repo.mkdir()
+            init_repo(repo)
+            (repo / "README.md").write_text("changed\n", encoding="utf-8")
+            script = pathlib.Path(raw) / "verify_by_change.py"
+            script.write_text(
+                "import sys\n"
+                "print('# Verification Checklist')\n"
+                "print('')\n"
+                "print('## Generated')\n"
+                "print('')\n"
+                "print('- args: ' + ' '.join(sys.argv[1:]))\n",
+                encoding="utf-8",
+            )
+
+            packet = build_packet(
+                repo,
+                base=None,
+                staged=False,
+                max_lines=20,
+                verify_by_change=str(script),
+            )
+
+            self.assertIn("## Verification Checklist", packet)
+            self.assertIn(f"Source: `verify-by-change: {script}`", packet)
+            self.assertIn("## Generated", packet)
+            self.assertIn("--repo", packet)
+            self.assertIn(str(repo), packet)
+
+    def test_generated_verification_checklist_forwards_staged_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw) / "repo"
+            repo.mkdir()
+            init_repo(repo)
+            (repo / "README.md").write_text("changed\n", encoding="utf-8")
+            run("git", "add", "README.md", cwd=repo)
+            script = pathlib.Path(raw) / "verify_by_change.py"
+            script.write_text(
+                "import sys\n"
+                "print('# Verification Checklist')\n"
+                "print('- args: ' + ' '.join(sys.argv[1:]))\n",
+                encoding="utf-8",
+            )
+
+            section = generated_verification_checklist_section(
+                str(script),
+                repo,
+                base=None,
+                staged=True,
+                max_lines=20,
+            )
+
+            self.assertIn("--staged", section)
+
     def test_readiness_report_section_summarizes_repo_flightcheck_json(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             report = pathlib.Path(raw) / "repo-flightcheck.json"
@@ -316,6 +373,72 @@ class ReviewPacketTests(unittest.TestCase):
             content = out.read_text(encoding="utf-8")
             self.assertIn("# Review Packet", content)
             self.assertIn("Review rendered Markdown", content)
+
+    def test_cli_writes_packet_with_generated_verify_by_change_checklist(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw) / "repo"
+            repo.mkdir()
+            init_repo(repo)
+            (repo / "README.md").write_text("changed\n", encoding="utf-8")
+            script = pathlib.Path(raw) / "verify_by_change.py"
+            script.write_text(
+                "import sys\n"
+                "print('# Verification Checklist')\n"
+                "print('## Generated')\n"
+                "print('- args: ' + ' '.join(sys.argv[1:]))\n",
+                encoding="utf-8",
+            )
+            out = pathlib.Path(raw) / "packet.md"
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "codex_review_packet.py"),
+                    "--repo",
+                    str(repo),
+                    "--verify-by-change",
+                    str(script),
+                    "--output",
+                    str(out),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            self.assertIn("Wrote review packet", result.stdout)
+            content = out.read_text(encoding="utf-8")
+            self.assertIn("verify-by-change:", content)
+            self.assertIn("## Generated", content)
+
+    def test_cli_rejects_two_verification_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw) / "repo"
+            repo.mkdir()
+            init_repo(repo)
+            checklist = pathlib.Path(raw) / "verification.md"
+            checklist.write_text("## Docs\n", encoding="utf-8")
+            script = pathlib.Path(raw) / "verify_by_change.py"
+            script.write_text("print('# Verification Checklist')\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "codex_review_packet.py"),
+                    "--repo",
+                    str(repo),
+                    "--verification-checklist",
+                    str(checklist),
+                    "--verify-by-change",
+                    str(script),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Use either --verification-checklist or --verify-by-change", result.stderr)
 
     def test_cli_writes_packet_with_readiness_report(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

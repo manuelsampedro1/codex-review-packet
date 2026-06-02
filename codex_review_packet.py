@@ -233,19 +233,51 @@ def context_sections(repo: pathlib.Path, max_lines: int) -> list[str]:
     return sections
 
 
-def verification_checklist_section(path: pathlib.Path, max_lines: int) -> str:
-    text = path.read_text(encoding="utf-8").strip()
+def verification_text_section(source: str, text: str, max_lines: int) -> str:
+    text = text.strip()
     if not text:
-        text = "_Verification checklist file is empty._"
+        text = "_Verification checklist is empty._"
     text = limit_lines(text, max_lines, "verification checklist")
     return f"""## Verification Checklist
 
-Source: `{path}`
+Source: `{source}`
 
 ```md
 {text}
 ```
 """
+
+
+def verification_checklist_section(path: pathlib.Path, max_lines: int) -> str:
+    return verification_text_section(str(path), path.read_text(encoding="utf-8"), max_lines)
+
+
+def verify_by_change_command(command: str, repo: pathlib.Path, base: str | None, staged: bool) -> str:
+    command_path = pathlib.Path(command)
+    args = [str(command_path), "--repo", str(repo)]
+    if command_path.suffix == ".py":
+        args = [sys.executable, *args]
+    if staged:
+        args.append("--staged")
+    elif base:
+        args.extend(["--base", base])
+
+    result = subprocess.run(args, text=True, capture_output=True, check=False)
+    if result.returncode != 0:
+        message = result.stderr.strip() or result.stdout.strip() or "verify-by-change command failed"
+        raise SystemExit(message)
+    return result.stdout
+
+
+def generated_verification_checklist_section(
+    command: str,
+    repo: pathlib.Path,
+    base: str | None,
+    staged: bool,
+    max_lines: int,
+) -> str:
+    text = verify_by_change_command(command, repo, base, staged)
+    return verification_text_section(f"verify-by-change: {command}", text, max_lines)
 
 
 def readiness_report_section(path: pathlib.Path, max_checks: int) -> str:
@@ -307,6 +339,7 @@ def build_packet(
     max_untracked_lines: int = 80,
     max_diff_lines: int | None = None,
     verification_checklist: pathlib.Path | None = None,
+    verify_by_change: str | None = None,
     max_verification_lines: int = 120,
     readiness_report: pathlib.Path | None = None,
     max_readiness_checks: int = 8,
@@ -317,7 +350,11 @@ def build_packet(
     verification_block = (
         f"\n{verification_checklist_section(verification_checklist, max_verification_lines)}"
         if verification_checklist
-        else ""
+        else (
+            f"\n{generated_verification_checklist_section(verify_by_change, repo, base, staged, max_verification_lines)}"
+            if verify_by_change
+            else ""
+        )
     )
     readiness_block = (
         f"\n{readiness_report_section(readiness_report, max_readiness_checks)}"
@@ -372,6 +409,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--untracked-lines", type=int, default=80, help="Max preview lines per untracked text file.")
     parser.add_argument("--diff-lines", type=positive_int, help="Max lines for the combined diff block.")
     parser.add_argument("--verification-checklist", help="Optional Markdown checklist to include in the packet.")
+    parser.add_argument(
+        "--verify-by-change",
+        help="Optional verify-by-change executable or .py script to generate and include a checklist.",
+    )
     parser.add_argument("--verification-lines", type=positive_int, default=120, help="Max lines for the verification checklist block.")
     parser.add_argument("--readiness-report", help="Optional repo-flightcheck JSON report to include in the packet.")
     parser.add_argument("--readiness-checks", type=positive_int, default=8, help="Max warning or failed readiness checks to include.")
@@ -388,6 +429,8 @@ def positive_int(value: str) -> int:
 
 def main() -> int:
     args = parse_args()
+    if args.verification_checklist and args.verify_by_change:
+        raise SystemExit("Use either --verification-checklist or --verify-by-change, not both.")
     repo = pathlib.Path(args.repo).resolve()
     packet = build_packet(
         repo,
@@ -397,6 +440,7 @@ def main() -> int:
         args.untracked_lines,
         args.diff_lines,
         pathlib.Path(args.verification_checklist).resolve() if args.verification_checklist else None,
+        args.verify_by_change,
         args.verification_lines,
         pathlib.Path(args.readiness_report).resolve() if args.readiness_report else None,
         args.readiness_checks,

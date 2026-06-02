@@ -69,3 +69,13 @@ Rationale:
 - A useful review packet should show repo setup risks before asking a reviewer to inspect the diff.
 - Keeping the report external avoids coupling this tool to Node or to a specific readiness scanner runtime.
 - Only warning and failed readiness checks are expanded so clean reports stay compact.
+
+## Generated Verification Checklist
+
+Allow callers to invoke a local `verify-by-change` executable or `.py` script with `--verify-by-change`.
+
+Rationale:
+
+- Review packets are strongest when the diff, repo context, readiness report, and verification plan are produced in one handoff.
+- The dependency remains optional and external, so this repo stays standard-library only.
+- Running the generator without a shell keeps the integration explicit and avoids command-injection footguns.
