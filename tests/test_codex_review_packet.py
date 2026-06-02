@@ -15,11 +15,13 @@ from codex_review_packet import (  # noqa: E402
     generated_verification_checklist_section,
     limit_lines,
     parse_status_paths,
+    parse_verification_envelope,
     readiness_report_section,
     review_lane_for_path,
     review_map_section,
     untracked_file_diff,
     verification_checklist_section,
+    verification_envelope_markdown,
 )
 
 
@@ -165,6 +167,59 @@ class ReviewPacketTests(unittest.TestCase):
             self.assertIn("# ... 2 more verification checklist lines omitted", section)
             self.assertNotIn("- inspect docs", section)
 
+    def test_verification_checklist_section_summarizes_verify_by_change_envelope(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            checklist = pathlib.Path(raw) / "checklist.json"
+            checklist.write_text(
+                """{
+  "schema_version": "verify-by-change.v1",
+  "source": {
+    "type": "review_packet",
+    "review_packet": "/tmp/review-packet.md"
+  },
+  "changed_files": ["README.md", "verify_by_change.py"],
+  "empty": false,
+  "categories": {
+    "docs": {
+      "files": ["README.md"],
+      "commands": ["Review rendered Markdown and verify links if public-facing."]
+    },
+    "python": {
+      "files": ["verify_by_change.py"],
+      "commands": ["Run `python3 -m py_compile` on changed Python files."]
+    }
+  }
+}
+""",
+                encoding="utf-8",
+            )
+
+            section = verification_checklist_section(checklist, max_lines=40)
+
+            self.assertIn("Envelope: `verify-by-change.v1`", section)
+            self.assertIn("Verification source: `review_packet, review_packet=/tmp/review-packet.md`", section)
+            self.assertIn("Changed files:", section)
+            self.assertIn("- `verify_by_change.py`", section)
+            self.assertIn("## Python", section)
+            self.assertIn("Run `python3 -m py_compile`", section)
+            self.assertNotIn('"schema_version"', section)
+
+    def test_verification_envelope_markdown_handles_empty_envelope(self) -> None:
+        markdown = verification_envelope_markdown({
+            "schema_version": "verify-by-change.v1",
+            "source": {"type": "git"},
+            "changed_files": [],
+            "empty": True,
+            "categories": {},
+        })
+
+        self.assertIn("No changed files detected.", markdown)
+        self.assertIn("Confirm the target ref", markdown)
+
+    def test_parse_verification_envelope_ignores_other_json(self) -> None:
+        self.assertIsNone(parse_verification_envelope('{"schema_version":"other"}'))
+        self.assertIsNone(parse_verification_envelope('["not", "an", "envelope"]'))
+
     def test_packet_can_include_external_verification_checklist(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             repo = pathlib.Path(raw)
@@ -184,6 +239,43 @@ class ReviewPacketTests(unittest.TestCase):
             self.assertIn("## Verification Checklist", packet)
             self.assertIn("## Docs", packet)
             self.assertIn("- Review rendered Markdown.", packet)
+
+    def test_packet_can_include_verify_by_change_json_envelope(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw) / "repo"
+            repo.mkdir()
+            init_repo(repo)
+            (repo / "README.md").write_text("changed\n", encoding="utf-8")
+            checklist = pathlib.Path(raw) / "verification-envelope.json"
+            checklist.write_text(
+                """{
+  "schema_version": "verify-by-change.v1",
+  "source": {"type": "git", "repo": "/tmp/repo"},
+  "changed_files": ["README.md"],
+  "empty": false,
+  "categories": {
+    "docs": {
+      "files": ["README.md"],
+      "commands": ["Review rendered Markdown and verify links if public-facing."]
+    }
+  }
+}
+""",
+                encoding="utf-8",
+            )
+
+            packet = build_packet(
+                repo,
+                base=None,
+                staged=False,
+                max_lines=20,
+                verification_checklist=checklist,
+            )
+
+            self.assertIn("Envelope: `verify-by-change.v1`", packet)
+            self.assertIn("Verification source: `git, repo=/tmp/repo`", packet)
+            self.assertIn("Changed files:", packet)
+            self.assertIn("Review rendered Markdown", packet)
 
     def test_packet_can_generate_verification_checklist_with_verify_by_change_script(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -373,6 +465,52 @@ class ReviewPacketTests(unittest.TestCase):
             content = out.read_text(encoding="utf-8")
             self.assertIn("# Review Packet", content)
             self.assertIn("Review rendered Markdown", content)
+
+    def test_cli_writes_packet_with_json_envelope_verification_checklist(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw) / "repo"
+            repo.mkdir()
+            init_repo(repo)
+            (repo / "README.md").write_text("changed\n", encoding="utf-8")
+            checklist = pathlib.Path(raw) / "checks.json"
+            checklist.write_text(
+                """{
+  "schema_version": "verify-by-change.v1",
+  "source": {"type": "explicit_paths"},
+  "changed_files": ["README.md"],
+  "empty": false,
+  "categories": {
+    "docs": {
+      "files": ["README.md"],
+      "commands": ["Review rendered Markdown and verify links if public-facing."]
+    }
+  }
+}
+""",
+                encoding="utf-8",
+            )
+            out = pathlib.Path(raw) / "packet.md"
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "codex_review_packet.py"),
+                    "--repo",
+                    str(repo),
+                    "--verification-checklist",
+                    str(checklist),
+                    "--output",
+                    str(out),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            self.assertIn("Wrote review packet", result.stdout)
+            content = out.read_text(encoding="utf-8")
+            self.assertIn("Envelope: `verify-by-change.v1`", content)
+            self.assertIn("Verification source: `explicit_paths`", content)
 
     def test_cli_writes_packet_with_generated_verify_by_change_checklist(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

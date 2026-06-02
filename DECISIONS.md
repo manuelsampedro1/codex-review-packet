@@ -79,3 +79,13 @@ Rationale:
 - Review packets are strongest when the diff, repo context, readiness report, and verification plan are produced in one handoff.
 - The dependency remains optional and external, so this repo stays standard-library only.
 - Running the generator without a shell keeps the integration explicit and avoids command-injection footguns.
+
+## Verification JSON Envelopes
+
+Render `verify-by-change.v1` JSON envelopes passed through `--verification-checklist` as Markdown checklist content instead of embedding raw JSON.
+
+Rationale:
+
+- Automation-friendly artifacts should still be readable in the final review packet.
+- The envelope preserves source metadata while the packet presents changed files and commands in reviewer-friendly Markdown.
+- Keeping this behind the existing optional checklist input avoids a hard dependency on `verify-by-change`.

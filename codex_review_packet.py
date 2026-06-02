@@ -249,7 +249,100 @@ Source: `{source}`
 
 
 def verification_checklist_section(path: pathlib.Path, max_lines: int) -> str:
-    return verification_text_section(str(path), path.read_text(encoding="utf-8"), max_lines)
+    text = path.read_text(encoding="utf-8")
+    envelope = parse_verification_envelope(text)
+    if envelope is not None:
+        return verification_envelope_section(str(path), envelope, max_lines)
+    return verification_text_section(str(path), text, max_lines)
+
+
+def parse_verification_envelope(text: str) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("schema_version") != "verify-by-change.v1":
+        return None
+    return payload
+
+
+def verification_envelope_section(source: str, payload: dict[str, Any], max_lines: int) -> str:
+    schema = str(payload.get("schema_version", "unknown"))
+    source_label = verification_source_label(payload.get("source"))
+    body = verification_envelope_markdown(payload)
+    body = limit_lines(body, max_lines, "verification checklist")
+    return f"""## Verification Checklist
+
+Source: `{source}`
+Envelope: `{schema}`
+Verification source: `{source_label}`
+
+```md
+{body}
+```
+"""
+
+
+def verification_source_label(source: object) -> str:
+    if not isinstance(source, dict):
+        return "unknown"
+    source_type = source.get("type") or "unknown"
+    details: list[str] = [str(source_type)]
+    repo = source.get("repo")
+    review_packet = source.get("review_packet")
+    base = source.get("base")
+    if repo:
+        details.append(f"repo={repo}")
+    if review_packet:
+        details.append(f"review_packet={review_packet}")
+    if base:
+        details.append(f"base={base}")
+    if source.get("staged"):
+        details.append("staged=true")
+    if source.get("include_working_tree"):
+        details.append("include_working_tree=true")
+    return ", ".join(details)
+
+
+def verification_envelope_markdown(payload: dict[str, Any]) -> str:
+    changed_files = payload.get("changed_files", [])
+    categories = payload.get("categories", {})
+    lines = ["# Verification Checklist", ""]
+    if payload.get("empty") or not changed_files:
+        lines.extend([
+            "No changed files detected.",
+            "",
+            "- Confirm the target ref, staged state, or working tree is what you intended to verify.",
+        ])
+        return "\n".join(lines).rstrip()
+
+    if isinstance(changed_files, list):
+        lines.append("Changed files:")
+        lines.append("")
+        for path in changed_files:
+            lines.append(f"- `{path}`")
+        lines.append("")
+
+    if not isinstance(categories, dict) or not categories:
+        lines.append("- No verification categories were supplied.")
+        return "\n".join(lines).rstrip()
+
+    for name, category in categories.items():
+        if not isinstance(category, dict):
+            continue
+        lines.append(f"## {str(name).replace('_', ' ').title()}")
+        lines.append("")
+        files = category.get("files", [])
+        commands = category.get("commands", [])
+        if isinstance(files, list):
+            lines.extend(f"- `{path}`" for path in files)
+            lines.append("")
+        if isinstance(commands, list):
+            lines.extend(f"- {command}" for command in commands)
+            lines.append("")
+    return "\n".join(lines).rstrip()
 
 
 def verify_by_change_command(command: str, repo: pathlib.Path, base: str | None, staged: bool) -> str:
