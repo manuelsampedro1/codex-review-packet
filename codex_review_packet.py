@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import re
 import shlex
 import subprocess
 import sys
@@ -592,6 +593,94 @@ def ci_run_section(path: pathlib.Path) -> str:
     return "\n".join(parts)
 
 
+def published_head_section(path: pathlib.Path) -> str:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    proof = normalize_published_head_payload(payload)
+
+    parts = [
+        "## Published HEAD",
+        "",
+        f"Source: `{path}`",
+        "",
+        f"- Status: `{proof['status']}`",
+        f"- Message: {proof['message']}",
+    ]
+
+    if proof["source_schema"]:
+        parts.append(f"- Schema: `{proof['source_schema']}`")
+    if proof["remote"]:
+        parts.append(f"- Remote: `{sanitize_remote_text(proof['remote'])}`")
+    if proof["branch"]:
+        parts.append(f"- Branch: `{proof['branch']}`")
+    if proof["local_head"]:
+        parts.append(f"- Local HEAD: `{proof['local_head']}`")
+    if proof["remote_head"]:
+        parts.append(f"- Remote HEAD: `{proof['remote_head']}`")
+    if proof["commit_url"]:
+        parts.append(f"- Commit URL: <{proof['commit_url']}>")
+    if proof["ci_url"]:
+        parts.append(f"- CI URL: <{proof['ci_url']}>")
+    if proof["evidence"]:
+        parts.extend(["", "Evidence:"])
+        parts.extend(f"- `{sanitize_remote_text(item)}`" for item in proof["evidence"])
+
+    parts.append("")
+    return "\n".join(parts)
+
+
+def normalize_published_head_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise SystemExit("Published HEAD proof must be a JSON object.")
+
+    check = repo_flightcheck_git_remote_check(payload)
+    if check is not None:
+        return {
+            "source_schema": "repo-flightcheck",
+            "status": str(check.get("status", "unknown")),
+            "message": str(check.get("message", "No message.")),
+            "remote": "",
+            "branch": "",
+            "local_head": "",
+            "remote_head": "",
+            "commit_url": "",
+            "ci_url": "",
+            "evidence": [str(item) for item in check.get("evidence", []) if item],
+        }
+
+    status = payload.get("status")
+    if status is None and "published" in payload:
+        status = "pass" if payload.get("published") else "warn"
+    if not status:
+        raise SystemExit("Published HEAD proof must include status or published.")
+
+    return {
+        "source_schema": str(payload.get("schema_version") or payload.get("schemaVersion") or ""),
+        "status": str(status),
+        "message": str(payload.get("message") or "No message."),
+        "remote": str(payload.get("remote") or payload.get("remote_url") or ""),
+        "branch": str(payload.get("branch") or ""),
+        "local_head": str(payload.get("local_head") or payload.get("localHead") or ""),
+        "remote_head": str(payload.get("remote_head") or payload.get("remoteHead") or ""),
+        "commit_url": str(payload.get("commit_url") or payload.get("commitUrl") or ""),
+        "ci_url": str(payload.get("ci_url") or payload.get("ciUrl") or ""),
+        "evidence": [str(item) for item in payload.get("evidence", []) if item] if isinstance(payload.get("evidence"), list) else [],
+    }
+
+
+def repo_flightcheck_git_remote_check(payload: dict[str, Any]) -> dict[str, Any] | None:
+    checks = payload.get("checks")
+    if not isinstance(checks, list):
+        return None
+    for check in checks:
+        if isinstance(check, dict) and (check.get("id") == "git-remote" or check.get("title") == "Git remote"):
+            return check
+    return None
+
+
+def sanitize_remote_text(text: str) -> str:
+    return re.sub(r"(https?://)[^/@\s]+@", r"\1", str(text))
+
+
 def normalize_ci_run_payload(payload: dict[str, Any]) -> dict[str, str]:
     if not isinstance(payload, dict):
         raise SystemExit("CI run report must be a JSON object.")
@@ -689,6 +778,7 @@ def build_packet(
     readiness_report: pathlib.Path | None = None,
     max_readiness_checks: int = 8,
     ci_run: pathlib.Path | None = None,
+    published_head: pathlib.Path | None = None,
 ) -> str:
     files = changed_files(repo, base, staged)
     diff = limit_lines(diff_body(repo, base, staged, max_untracked_lines).strip(), max_diff_lines, "diff")
@@ -710,6 +800,11 @@ def build_packet(
     ci_block = (
         f"\n{ci_run_section(ci_run)}"
         if ci_run
+        else ""
+    )
+    published_head_block = (
+        f"\n{published_head_section(published_head)}"
+        if published_head
         else ""
     )
 
@@ -738,6 +833,7 @@ Base: `{base_label}`
 {context_block}
 {readiness_block}
 {ci_block}
+{published_head_block}
 
 ## Diff
 
@@ -771,6 +867,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--readiness-report", help="Optional repo-flightcheck JSON report to include in the packet.")
     parser.add_argument("--readiness-checks", type=positive_int, default=8, help="Max warning or failed readiness checks to include.")
     parser.add_argument("--ci-run", help="Optional GitHub Actions run JSON to include in the packet.")
+    parser.add_argument("--published-head", help="Optional published-HEAD proof JSON to include in the packet.")
     parser.add_argument("--output", help="Optional output file path. Defaults to stdout.")
     return parser.parse_args()
 
@@ -800,6 +897,7 @@ def main() -> int:
         pathlib.Path(args.readiness_report).resolve() if args.readiness_report else None,
         args.readiness_checks,
         pathlib.Path(args.ci_run).resolve() if args.ci_run else None,
+        pathlib.Path(args.published_head).resolve() if args.published_head else None,
     )
     if args.output:
         pathlib.Path(args.output).write_text(packet, encoding="utf-8")

@@ -15,6 +15,7 @@ The problem: most AI review output gets generic when the model sees only a diff 
 - Can cap the combined diff block so large packets stay usable in model context.
 - Can embed a `repo-flightcheck --json` report or `repo-flightcheck --contract` artifact so review packets include repo setup risks before the diff.
 - Can embed GitHub Actions run JSON so review packets carry CI status, conclusion, URL, branch, and SHA.
+- Can embed published-HEAD proof so packets show whether the reviewed local commit is actually on the public remote branch.
 - Can embed a Markdown verification checklist or a `verify-by-change --json-envelope` artifact.
 - Can invoke a local `verify-by-change` executable or `.py` script directly, request its JSON envelope when supported, and embed the generated checklist as Markdown.
 - Writes one Markdown packet that can be pasted into Codex or attached to another review workflow.
@@ -124,6 +125,21 @@ python3 codex_review_packet.py \
   --output review-packet.md
 ```
 
+Review packet with public commit proof from `repo-flightcheck --check-remote --json`:
+
+```sh
+node /path/to/repo-flightcheck/bin/repo-flightcheck.js \
+  /path/to/repo \
+  --check-remote \
+  --json \
+  > /tmp/repo-flightcheck-published-head.json
+
+python3 codex_review_packet.py \
+  --repo /path/to/repo \
+  --published-head /tmp/repo-flightcheck-published-head.json \
+  --output review-packet.md
+```
+
 ## Example Output
 
 ````md
@@ -164,6 +180,10 @@ Score: `84/100`
 - Conclusion: `success`
 - URL: <https://github.com/OWNER/REPO/actions/runs/RUN_ID>
 
+## Published HEAD
+- Status: `pass`
+- Message: Origin remote is reachable and local HEAD is published on origin/main.
+
 ## Diff
 ```diff
 ...
@@ -201,6 +221,8 @@ node /path/to/repo-flightcheck/bin/repo-flightcheck.js . --contract > /tmp/repo-
 python3 codex_review_packet.py --repo . --readiness-report /tmp/repo-readiness-contract.json >/tmp/review-packet-with-readiness-contract.md
 printf '{"id":123,"name":"CI","status":"completed","conclusion":"success","html_url":"https://github.com/example/repo/actions/runs/123","head_sha":"abc123"}\n' >/tmp/ci-run.json
 python3 codex_review_packet.py --repo . --ci-run /tmp/ci-run.json >/tmp/review-packet-with-ci.md
+node /path/to/repo-flightcheck/bin/repo-flightcheck.js . --check-remote --json > /tmp/published-head.json
+python3 codex_review_packet.py --repo . --published-head /tmp/published-head.json >/tmp/review-packet-with-published-head.md
 grep -q '## Review Map' /tmp/review-packet.md
 grep -q 'Envelope: `verify-by-change.v1`' /tmp/review-packet-with-envelope.md
 grep -q 'verify-by-change:' /tmp/review-packet-generated-checklist.md
@@ -208,6 +230,7 @@ grep -q 'Envelope: `verify-by-change.v1`' /tmp/review-packet-generated-envelope.
 grep -q '## Repo Readiness' /tmp/review-packet-with-readiness.md
 grep -q 'Contract: `repo-flightcheck.agent-contract.v1`' /tmp/review-packet-with-readiness-contract.md
 grep -q '## CI Evidence' /tmp/review-packet-with-ci.md
+grep -q '## Published HEAD' /tmp/review-packet-with-published-head.md
 test -s /tmp/review-packet.md
 ```
 

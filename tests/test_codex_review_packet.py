@@ -18,6 +18,7 @@ from codex_review_packet import (  # noqa: E402
     normalize_ci_run_payload,
     parse_status_paths,
     parse_verification_envelope,
+    published_head_section,
     readiness_report_section,
     review_lane_for_path,
     review_map_section,
@@ -640,6 +641,74 @@ class ReviewPacketTests(unittest.TestCase):
         self.assertEqual(payload["status"], "in_progress")
         self.assertEqual(payload["conclusion"], "null")
 
+    def test_published_head_section_summarizes_dedicated_proof_json(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            report = pathlib.Path(raw) / "published-head.json"
+            report.write_text(
+                """{
+  "schema_version": "published-head.v1",
+  "status": "pass",
+  "message": "Local HEAD is published.",
+  "remote": "https://token@example.com/example/repo.git",
+  "branch": "main",
+  "local_head": "abc123",
+  "remote_head": "abc123",
+  "commit_url": "https://github.com/example/repo/commit/abc123",
+  "ci_url": "https://github.com/example/repo/actions/runs/123",
+  "evidence": ["https://token@example.com/example/repo.git", "origin/main: abc123"]
+}
+""",
+                encoding="utf-8",
+            )
+
+            section = published_head_section(report)
+
+            self.assertIn("## Published HEAD", section)
+            self.assertIn(f"Source: `{report}`", section)
+            self.assertIn("Status: `pass`", section)
+            self.assertIn("Schema: `published-head.v1`", section)
+            self.assertIn("Remote: `https://example.com/example/repo.git`", section)
+            self.assertIn("Branch: `main`", section)
+            self.assertIn("Local HEAD: `abc123`", section)
+            self.assertIn("Remote HEAD: `abc123`", section)
+            self.assertIn("Commit URL: <https://github.com/example/repo/commit/abc123>", section)
+            self.assertIn("CI URL: <https://github.com/example/repo/actions/runs/123>", section)
+            self.assertIn("- `origin/main: abc123`", section)
+            self.assertNotIn("token@", section)
+
+    def test_published_head_section_extracts_repo_flightcheck_git_remote_check(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            report = pathlib.Path(raw) / "repo-flightcheck.json"
+            report.write_text(
+                """{
+  "summary": {"score": 98},
+  "checks": [
+    {
+      "id": "git-remote",
+      "title": "Git remote",
+      "status": "warn",
+      "message": "Origin remote is reachable, but local HEAD is not published on origin/main.",
+      "evidence": [
+        "git@github.com:example/repo.git",
+        "local HEAD: abc123",
+        "origin/main: def456"
+      ]
+    }
+  ]
+}
+""",
+                encoding="utf-8",
+            )
+
+            section = published_head_section(report)
+
+            self.assertIn("## Published HEAD", section)
+            self.assertIn("Status: `warn`", section)
+            self.assertIn("Schema: `repo-flightcheck`", section)
+            self.assertIn("local HEAD is not published", section)
+            self.assertIn("- `local HEAD: abc123`", section)
+            self.assertIn("- `origin/main: def456`", section)
+
     def test_packet_can_include_repo_readiness_report(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             repo = pathlib.Path(raw) / "repo"
@@ -708,6 +777,39 @@ class ReviewPacketTests(unittest.TestCase):
             self.assertIn("Run: `123`", packet)
             self.assertIn("Conclusion: `success`", packet)
             self.assertIn("SHA: `abc123`", packet)
+            self.assertIn("## Diff", packet)
+
+    def test_packet_can_include_published_head_proof(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw) / "repo"
+            repo.mkdir()
+            init_repo(repo)
+            (repo / "README.md").write_text("changed\n", encoding="utf-8")
+            proof = pathlib.Path(raw) / "published-head.json"
+            proof.write_text(
+                """{
+  "schema_version": "published-head.v1",
+  "published": true,
+  "message": "Origin remote is reachable and local HEAD is published on origin/main.",
+  "branch": "main",
+  "local_head": "abc123",
+  "remote_head": "abc123"
+}
+""",
+                encoding="utf-8",
+            )
+
+            packet = build_packet(
+                repo,
+                base=None,
+                staged=False,
+                max_lines=20,
+                published_head=proof,
+            )
+
+            self.assertIn("## Published HEAD", packet)
+            self.assertIn("Status: `pass`", packet)
+            self.assertIn("local HEAD is published", packet)
             self.assertIn("## Diff", packet)
 
     def test_cli_writes_output_file(self) -> None:
@@ -941,6 +1043,49 @@ class ReviewPacketTests(unittest.TestCase):
             self.assertIn("## CI Evidence", content)
             self.assertIn("Conclusion: `success`", content)
             self.assertIn("URL: <https://github.com/example/repo/actions/runs/123>", content)
+
+    def test_cli_writes_packet_with_published_head_proof(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = pathlib.Path(raw) / "repo"
+            repo.mkdir()
+            init_repo(repo)
+            (repo / "README.md").write_text("changed\n", encoding="utf-8")
+            proof = pathlib.Path(raw) / "published-head.json"
+            proof.write_text(
+                """{
+  "schema_version": "published-head.v1",
+  "status": "warn",
+  "message": "Origin remote is reachable, but local HEAD is not published on origin/main.",
+  "branch": "main",
+  "local_head": "abc123",
+  "remote_head": "def456"
+}
+""",
+                encoding="utf-8",
+            )
+            out = pathlib.Path(raw) / "packet.md"
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "codex_review_packet.py"),
+                    "--repo",
+                    str(repo),
+                    "--published-head",
+                    str(proof),
+                    "--output",
+                    str(out),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            self.assertIn("Wrote review packet", result.stdout)
+            content = out.read_text(encoding="utf-8")
+            self.assertIn("## Published HEAD", content)
+            self.assertIn("Status: `warn`", content)
+            self.assertIn("Remote HEAD: `def456`", content)
 
 
 if __name__ == "__main__":
